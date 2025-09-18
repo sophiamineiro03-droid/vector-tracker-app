@@ -1,0 +1,33 @@
+name: vector_tracker
+description: "Um aplicativo para monitoramento de vetores da Doença de Chagas."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Ícones padrão do iOS
+  cupertino_icons: ^1.0.8
+
+  # Adicionado para usar fontes profissionais do Google
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # Ferramenta para análise de código e boas práticas
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  # Declarando a pasta inteira para incluir todas as imagens de uma vez.
+  # Isso é mais prático do que declarar cada arquivo individualmente.
+  assets:
+    - assets/images/
