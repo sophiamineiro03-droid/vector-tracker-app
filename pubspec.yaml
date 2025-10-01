@@ -1,4 +1,4 @@
-name: vector_tracker
+name: vector_tracker_app
 description: "Um aplicativo para monitoramento de vetores da Doença de Chagas."
 publish_to: 'none'
 
@@ -16,6 +16,7 @@ dependencies:
 
   # Adicionado para usar fontes profissionais do Google
   google_fonts: ^6.2.1
+  image_picker: ^1.1.2
 
 dev_dependencies:
   flutter_test:
@@ -27,7 +28,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # Declarando a pasta inteira para incluir todas as imagens de uma vez.
-  # Isso é mais prático do que declarar cada arquivo individualmente.
+  # Para adicionar assets ao seu aplicativo, adicione uma seção de assets como esta:
   assets:
-    - assets/images/
+    - assets/barbeiro.jpg
+    - assets/chagas_sintomas.jpeg
+    - assets/prevencao.webp
+    - assets/logo.png
