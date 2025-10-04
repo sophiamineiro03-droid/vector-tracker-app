@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Permissões de Internet -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Permissões de Localização -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <application
         android:label="vector_tracker"
         android:name="${applicationName}"

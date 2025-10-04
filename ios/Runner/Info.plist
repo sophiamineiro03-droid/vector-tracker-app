@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+
+	<!-- Permissões de Localização para iOS -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Este aplicativo precisa da sua localização para registrar o local exato da denúncia.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Este aplicativo precisa da sua localização para registrar o local exato da denúncia.</string>
 </dict>
 </plist>

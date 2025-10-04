@@ -18,6 +18,26 @@ dependencies:
   google_fonts: ^6.2.1
   image_picker: ^1.1.2
 
+  # Adicionado para integração com o Supabase
+  supabase_flutter: ^2.5.0
+
+  # Adicionado para obter a localização do GPS
+  geolocator: ^11.0.0
+
+  # Adicionado para exibir o mapa (OpenStreetMap)
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.1
+
+  # Adicionado para converter coordenadas em endereço
+  geocoding: ^3.0.0
+
+  # Adicionado para agrupar marcadores no mapa
+  flutter_map_marker_cluster: ^1.0.0
+
+  # Adicionado para formatação de data
+  intl: ^0.19.0
+
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -40,11 +40,10 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 16),
             ElevatedButton.icon(
               icon: const Icon(Icons.map),
-              label: const Text('Mapa de Calor'),
+              label: const Text('Mapa de Ocorrências'), // Nome atualizado
               onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Tela de Mapa ainda não implementada.')),
-                );
+                // AGORA NAVEGA PARA A TELA DO MAPA
+                Navigator.pushNamed(context, '/mapa_denuncias');
               },
             ),
           ],
