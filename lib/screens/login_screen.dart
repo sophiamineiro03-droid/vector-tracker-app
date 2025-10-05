@@ -22,7 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
         // Fundo com gradiente
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF39A2AE), Color(0xFF2979FF)], // <<-- GRADIENTE ATUALIZADO
+            colors: [Color(0xFF39A2AE), Color(0xFF2979FF)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -62,16 +62,6 @@ class _LoginScreenState extends State<LoginScreen> {
             _buildTabSelector(context, accentColor),
             const SizedBox(height: 24.0),
 
-            // Campo de Usuário
-            _buildTextField(
-                hint: 'Usuário', icon: Icons.person_outline, obscure: false),
-            const SizedBox(height: 16.0),
-
-            // Campo de Senha
-            _buildTextField(
-                hint: 'Senha', icon: Icons.lock_outline, obscure: true),
-            const SizedBox(height: 24.0),
-
             // Botão Entrar
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -83,46 +73,16 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               onPressed: () {
-                // Navega para a home após o login
-                Navigator.pushReplacementNamed(context, '/home');
+                if (_selectedTab == 0) {
+                  Navigator.pushReplacementNamed(context, '/community_home');
+                } else {
+                  Navigator.pushReplacementNamed(context, '/agent_home');
+                }
               },
               child: const Text('Entrar',
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ),
-            const SizedBox(height: 16.0),
-
-            // Texto "Esqueceu sua senha?"
-            Text(
-              'Esqueceu sua senha?',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: primaryColor,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
           ],
-        ),
-      ),
-    );
-  }
-
-  // Widget para os campos de texto
-  Widget _buildTextField(
-      {required String hint, required IconData icon, required bool obscure}) {
-    return TextField(
-      obscureText: obscure,
-      decoration: InputDecoration(
-        hintText: hint,
-        filled: true,
-        fillColor: Colors.grey[50],
-        prefixIcon: Icon(icon, color: Colors.grey[600]),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12.0),
-          borderSide: BorderSide(color: Colors.grey[200]!),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12.0),
-          borderSide: BorderSide(color: Colors.grey[200]!),
         ),
       ),
     );

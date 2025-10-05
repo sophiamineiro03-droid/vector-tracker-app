@@ -4,11 +4,15 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 // Importa TODAS as suas telas da pasta 'screens'
 import 'package:vector_tracker_app/screens/login_screen.dart';
-import 'package:vector_tracker_app/screens/home_screen.dart';
+// A HomeScreen antiga foi removida e substituída pelas duas novas telas abaixo
+import 'package:vector_tracker_app/screens/community_home_screen.dart';
+import 'package:vector_tracker_app/screens/agent_home_screen.dart';
 import 'package:vector_tracker_app/screens/painel_ace_screen.dart';
 import 'package:vector_tracker_app/screens/educacao_screen.dart';
 import 'package:vector_tracker_app/screens/denuncia_screen.dart';
 import 'package:vector_tracker_app/screens/mapa_denuncias_screen.dart';
+
+// A importação da tela antiga foi removida, pois não é mais necessária.
 
 Future<void> main() async { 
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,17 +59,21 @@ class MyApp extends StatelessWidget {
         ),
       ),
 
-      // A tela inicial volta a ser a LoginScreen
+      // A tela inicial continua sendo a LoginScreen
       home: const LoginScreen(),
 
-      // Mantém as rotas para navegação interna
+      // --- ROTAS ATUALIZADAS ---
       routes: {
         '/login': (context) => const LoginScreen(),
-        '/home': (context) => const HomeScreen(),
+        // As duas novas telas principais
+        '/community_home': (context) => const CommunityHomeScreen(),
+        '/agent_home': (context) => const AgentHomeScreen(),
+        // Rotas para as telas de funcionalidades
         '/painel_agente': (context) => const PainelAceScreen(),
         '/educacao': (context) => const EducacaoScreen(),
         '/denuncia': (context) => const DenunciaScreen(),
         '/mapa_denuncias': (context) => const MapaDenunciasScreen(),
+        // A rota para a nova tela não é necessária aqui, pois usaremos navegação dinâmica
       },
     );
   }

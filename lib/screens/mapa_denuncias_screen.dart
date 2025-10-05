@@ -111,16 +111,12 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
         options: MapOptions(initialCameraFit: CameraFit.bounds(bounds: LatLngBounds(const LatLng(-2.7, -45.9), const LatLng(-10.9, -40.3)), padding: const EdgeInsets.all(20))),
         children: [
           TileLayer(
-            urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            subdomains: const ['a', 'b', 'c'],
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            // A linha de subdomains foi removida para seguir as boas práticas.
             retinaMode: true,
             userAgentPackageName: 'com.example.vector_tracker_app',
-            // OTIMIZAÇÃO: Adiciona um tratamento de erro para falhas de rede.
-            // Se um 'tile' do mapa falhar ao carregar, o app não vai mais travar
-            // ou mostrar uma tela de erro. Apenas um espaço vazio aparecerá no lugar.
             errorTileCallback: (tile, error, stack) {
-              // Apenas loga o erro no console de debug, sem interromper o app.
-              debugPrint('Falha ao carregar tile do mapa: ${tile.coords}, erro: $error');
+              debugPrint('Falha ao carregar tile do mapa: ${tile.coordinates}, erro: $error');
             },
           ),
           MarkerClusterLayerWidget(
