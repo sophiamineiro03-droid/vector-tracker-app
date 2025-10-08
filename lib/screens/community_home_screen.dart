@@ -11,7 +11,7 @@ class CommunityHomeScreen extends StatelessWidget {
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center, // <<< ERRO CORRIGIDO
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             ElevatedButton.icon(
@@ -23,6 +23,14 @@ class CommunityHomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
+              icon: const Icon(Icons.list_alt),
+              label: const Text('Minhas Denúncias'),
+              onPressed: () {
+                Navigator.pushNamed(context, '/minhas_denuncias');
+              },
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
               icon: const Icon(Icons.school),
               label: const Text('Seção Educativa'),
               onPressed: () {
@@ -30,14 +38,6 @@ class CommunityHomeScreen extends StatelessWidget {
               },
             ),
             const SizedBox(height: 16),
-            // Botão para funcionalidade futura (desabilitado)
-            ElevatedButton.icon(
-              icon: const Icon(Icons.list_alt),
-              label: const Text('Minhas Denúncias'),
-              onPressed: null, // null para desabilitar o botão
-            ),
-            const SizedBox(height: 16),
-            // Botão para funcionalidade futura (desabilitado)
             ElevatedButton.icon(
               icon: const Icon(Icons.warning_amber_rounded),
               label: const Text('Mapa de Risco'),

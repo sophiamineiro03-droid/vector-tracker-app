@@ -8,18 +8,16 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // Mantém o controle da aba selecionada (0 para Comunidade, 1 para Agente)
-  int _selectedTab = 0;
+  int _selectedTab = 0; // 0 para Comunidade, 1 para Agente
+  bool _obscureText = true; // Para controlar a visibilidade da senha
 
   @override
   Widget build(BuildContext context) {
-    // Cores inspiradas na sua logo e design
-    final Color primaryColor = Theme.of(context).colorScheme.primary; // Azul do tema
-    final Color accentColor = Color(0xFF00695C); // Um verde escuro para o botão
+    final Color accentColor = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
+      // 1. Fundo degradê restaurado
       body: Container(
-        // Fundo com gradiente
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [Color(0xFF39A2AE), Color(0xFF2979FF)],
@@ -33,7 +31,101 @@ class _LoginScreenState extends State<LoginScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 400),
-                child: _buildLoginForm(context, primaryColor, accentColor),
+                // 2. Formulário dentro de um Card branco puro
+                child: Card(
+                  color: Colors.white, // Garante o fundo branco puro
+                  elevation: 8.0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    // 3. Conteúdo que você gostou, mantido dentro do Card
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Image.asset('assets/logo.png', height: 100),
+                        const SizedBox(height: 24.0),
+
+                        _buildTabSelector(context, accentColor),
+                        const SizedBox(height: 24.0),
+
+                        TextFormField(
+                          decoration: InputDecoration(
+                            labelText: 'Email',
+                            prefixIcon: const Icon(Icons.email_outlined),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                            ),
+                          ),
+                          keyboardType: TextInputType.emailAddress,
+                        ),
+                        const SizedBox(height: 16.0),
+
+                        TextFormField(
+                          obscureText: _obscureText,
+                          decoration: InputDecoration(
+                            labelText: 'Senha',
+                            prefixIcon: const Icon(Icons.lock_outline),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscureText ? Icons.visibility_off : Icons.visibility,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _obscureText = !_obscureText;
+                                });
+                              },
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24.0),
+
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: accentColor,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                            ),
+                          ),
+                          onPressed: () {
+                            if (_selectedTab == 0) {
+                              Navigator.pushReplacementNamed(context, '/community_home');
+                            } else {
+                              Navigator.pushReplacementNamed(context, '/agent_home');
+                            }
+                          },
+                          child: const Text('Entrar',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(height: 16.0),
+
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Text("Não tem uma conta?", style: TextStyle(color: Colors.black54)),
+                            TextButton(
+                              onPressed: () {
+                                // Ação de cadastro será implementada depois
+                              },
+                              child: Text(
+                                'Cadastre-se',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: accentColor,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -42,53 +134,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Widget principal do formulário
-  Widget _buildLoginForm(
-      BuildContext context, Color primaryColor, Color accentColor) {
-    return Card(
-      elevation: 8.0,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Logo
-            Image.asset('assets/logo.png', height: 120),
-            const SizedBox(height: 24.0),
-
-            // Seletor de Abas
-            _buildTabSelector(context, accentColor),
-            const SizedBox(height: 24.0),
-
-            // Botão Entrar
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: accentColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12.0),
-                ),
-              ),
-              onPressed: () {
-                if (_selectedTab == 0) {
-                  Navigator.pushReplacementNamed(context, '/community_home');
-                } else {
-                  Navigator.pushReplacementNamed(context, '/agent_home');
-                }
-              },
-              child: const Text('Entrar',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Widget para o seletor de abas customizado
   Widget _buildTabSelector(BuildContext context, Color accentColor) {
     return Container(
       decoration: BoxDecoration(
@@ -104,7 +149,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Item individual da aba
   Widget _buildTabItem(
       BuildContext context, String title, int index, Color accentColor) {
     final isSelected = _selectedTab == index;
@@ -116,7 +160,7 @@ class _LoginScreenState extends State<LoginScreen> {
           });
         },
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
             color: isSelected ? accentColor : Colors.transparent,
             borderRadius: BorderRadius.circular(25.0),

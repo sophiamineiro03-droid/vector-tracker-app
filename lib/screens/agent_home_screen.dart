@@ -10,7 +10,6 @@ class AgentHomeScreen extends StatelessWidget {
       appBar: const GradientAppBar(title: 'Painel de Controle'),
       body: Padding(
         padding: const EdgeInsets.all(12.0),
-        // Usa um GridView para um layout de painel moderno
         child: GridView.count(
           crossAxisCount: 2, // 2 colunas
           crossAxisSpacing: 12,
@@ -33,22 +32,14 @@ class AgentHomeScreen extends StatelessWidget {
               title: 'Minha Produtividade',
               subtitle: 'Ver relatórios e gráficos',
               onTap: () { /* Navegação para a futura tela de produtividade */ },
-              // enabled: false, // Descomente para desabilitar visualmente
             ),
+            // --- CARD DE SINCRONIZAÇÃO CORRIGIDO ---
             _DashboardCard(
               icon: Icons.sync_rounded,
               title: 'Sincronizar Dados',
-              subtitle: 'Enviar dados offline',
-              onTap: () { /* Lógica de sincronização */ },
-              // Indicador visual para itens pendentes
-              trailing: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.orangeAccent,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Text('3', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              ),
+              subtitle: 'Ver itens pendentes de envio',
+              // Ação removida para evitar crash, pois a rota '/sync' não existe
+              onTap: () { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tela de sincronização ainda não implementada.'))); },
             ),
             _DashboardCard(
               icon: Icons.person_outline,
@@ -64,7 +55,6 @@ class AgentHomeScreen extends StatelessWidget {
 }
 
 /// _DashboardCard: Um componente de card customizado e reutilizável para o painel.
-/// Segue 100% o design do app, usando as cores e fontes do tema.
 class _DashboardCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -89,7 +79,7 @@ class _DashboardCard extends StatelessWidget {
 
     return Card(
       elevation: 2.0,
-      clipBehavior: Clip.antiAlias, // Garante que o InkWell respeite as bordas
+      clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
       color: enabled ? colorScheme.surface : colorScheme.surface.withOpacity(0.5),
       child: InkWell(

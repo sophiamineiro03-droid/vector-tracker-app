@@ -1,161 +1,179 @@
-import 'dart:async';
+import 'dart:io'; // Importa a biblioteca para manipulação de arquivos
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_marker_cluster/flutter_map_marker_cluster.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:vector_tracker_app/main.dart';
+import 'package:provider/provider.dart';
+import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 
-class MapaDenunciasScreen extends StatefulWidget {
+class MapaDenunciasScreen extends StatelessWidget {
   const MapaDenunciasScreen({super.key});
 
-  @override
-  State<MapaDenunciasScreen> createState() => _MapaDenunciasScreenState();
-}
-
-class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
-  final _mapController = MapController();
-  final _searchController = TextEditingController();
-  Timer? _debounce;
-
-  List<Map<String, dynamic>> _allDenuncias = [];
-  List<Marker> _visibleMarkers = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchDenuncias();
-    _searchController.addListener(_onSearchChanged);
+  double? _parseDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
   }
 
-  @override
-  void dispose() {
-    _searchController.removeListener(_onSearchChanged);
-    _searchController.dispose();
-    _debounce?.cancel();
-    super.dispose();
-  }
+  List<Marker> _createMarkers(BuildContext context, List<Map<String, dynamic>> denuncias) {
+    return denuncias.map((denuncia) {
+      final lat = _parseDouble(denuncia['latitude']);
+      final lon = _parseDouble(denuncia['longitude']);
 
-  void _onSearchChanged() {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), _filterDenuncias);
-  }
+      if (lat == null || lon == null) return null;
 
-  void _showDenunciaDetails(Map<String, dynamic> denuncia) {
-    final imageUrl = denuncia['image_url'];
-    final endereco = [denuncia['rua'], denuncia['numero'], denuncia['bairro'], denuncia['cidade'], denuncia['estado']].where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
-    showModalBottomSheet(context: context, isScrollControlled: true, shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))), builder: (context) => SingleChildScrollView(child: Padding(padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.of(context).viewPadding.bottom), child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [if (imageUrl != null) ...[ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(imageUrl, height: 200, width: double.infinity, fit: BoxFit.cover, loadingBuilder: (context, child, progress) => progress == null ? child : Container(height: 200, color: Colors.grey[200], child: const Center(child: CircularProgressIndicator())), errorBuilder: (context, error, stack) => Container(height: 200, color: Colors.grey[200], child: const Center(child: Icon(Icons.broken_image, size: 40, color: Colors.grey))))), const SizedBox(height: 16)], const Text("Detalhes da Ocorrência", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)), const SizedBox(height: 16), Text(endereco.isEmpty ? "Endereço não informado" : endereco), const Divider(height: 24), const Text("Descrição:", style: TextStyle(fontWeight: FontWeight.w500)), const SizedBox(height: 4), Text(denuncia['descricao'] ?? 'Nenhuma descrição fornecida.')]))));
-  }
+      final isPending = denuncia['is_pending'] ?? false;
+      final status = denuncia['status']?.toString().toLowerCase() ?? 'pendente';
 
-  Future<void> _fetchDenuncias() async {
-    try {
-      final response = await supabase.from('denuncias').select();
-      _allDenuncias = List<Map<String, dynamic>>.from(response);
-      _buildMarkers(_allDenuncias);
-    } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao carregar denúncias: $error')));
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  void _filterDenuncias() {
-    final query = _searchController.text.toLowerCase();
-    final filtered = query.isEmpty ? _allDenuncias : _allDenuncias.where((d) => (d['rua']?.toString().toLowerCase() ?? '').contains(query) || (d['bairro']?.toString().toLowerCase() ?? '').contains(query) || (d['cidade']?.toString().toLowerCase() ?? '').contains(query) || (d['estado']?.toString().toLowerCase() ?? '').contains(query) || (d['descricao']?.toString().toLowerCase() ?? '').contains(query)).toList();
-    _buildMarkers(filtered);
-  }
-
-  void _buildMarkers(List<Map<String, dynamic>> denuncias) {
-    final List<Marker> loadedMarkers = [];
-    final List<LatLng> points = [];
-    for (final denuncia in denuncias) {
-      final lat = denuncia['latitude'];
-      final lon = denuncia['longitude'];
-      if (lat != null && lon != null) {
-        points.add(LatLng(lat, lon));
-        loadedMarkers.add(Marker(point: LatLng(lat, lon), width: 40, height: 40, child: GestureDetector(onTap: () => _showDenunciaDetails(denuncia), child: const Icon(Icons.location_pin, color: Colors.red, size: 40))));
+      Color markerColor;
+      if (isPending) {
+        markerColor = Colors.orange;
+      } else if (status == 'realizada') {
+        markerColor = Colors.green;
+      } else if (status == 'fechado' || status == 'recusada') {
+        markerColor = Colors.red;
+      } else {
+        markerColor = Colors.blue;
       }
-    }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && points.isNotEmpty) {
-        if (points.length > 1) {
-          final bounds = LatLngBounds.fromPoints(points);
-          _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)));
+      return Marker(
+        width: 40.0, height: 40.0, point: LatLng(lat, lon),
+        child: GestureDetector(
+          onTap: () => _showDenunciaDetails(context, denuncia),
+          child: Icon(Icons.location_pin, color: markerColor, size: 40.0),
+        ),
+      );
+    }).whereType<Marker>().toList();
+  }
+
+  void _showDenunciaDetails(BuildContext context, Map<String, dynamic> denuncia) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        // --- LÓGICA DE IMAGEM OFFLINE-FIRST ---
+        final imagePath = denuncia['image_path'] as String?;
+        final imageUrl = denuncia['agent_image_url'] ?? denuncia['image_url'] as String?;
+        final endereco = [denuncia['rua'], denuncia['numero'], denuncia['bairro']].where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
+        final descricao = denuncia['descricao'] ?? 'Nenhuma descrição fornecida.';
+        final status = (denuncia['status'] as String?)?.toUpperCase() ?? 'PENDENTE';
+        final isPending = denuncia['is_pending'] ?? false;
+
+        Widget imageWidget;
+        if (imagePath != null) {
+          imageWidget = Image.file(File(imagePath), height: 200, width: double.infinity, fit: BoxFit.cover);
+        } else if (imageUrl != null) {
+          imageWidget = Image.network(imageUrl, height: 200, width: double.infinity, fit: BoxFit.cover,
+            loadingBuilder: (ctx, child, progress) => progress == null ? child : const Center(child: CircularProgressIndicator()),
+            errorBuilder: (ctx, err, stack) => Container(height: 200, color: Colors.grey[200], child: const Center(child: Icon(Icons.broken_image, color: Colors.grey, size: 48))),
+          );
         } else {
-          _mapController.move(points.first, 15.0);
+          imageWidget = Container(height: 150, width: double.infinity, decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(12)), child: const Center(child: Icon(Icons.image_not_supported, color: Colors.grey, size: 48)));
         }
-      }
-    });
 
-    setState(() {
-      _visibleMarkers = loadedMarkers;
-    });
+        return DraggableScrollableSheet(
+          expand: false, initialChildSize: 0.5, maxChildSize: 0.9, minChildSize: 0.3,
+          builder: (BuildContext context, ScrollController scrollController) {
+            return SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(child: Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(12)))),
+                  const SizedBox(height: 16),
+                  Text('Detalhes da Ocorrência', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  ClipRRect(borderRadius: BorderRadius.circular(12), child: imageWidget),
+                  const SizedBox(height: 20),
+                  const Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(color: isPending ? Colors.orange.shade100 : Colors.blue.shade100, borderRadius: BorderRadius.circular(8)),
+                    child: Text(isPending ? 'PENDENTE DE SINCRONIZAÇÃO' : status, style: TextStyle(fontWeight: FontWeight.bold, color: isPending ? Colors.orange.shade800 : Colors.blue.shade800)),
+                  ),
+                  const Divider(height: 24),
+                  const Text('Localização', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 4),
+                  Text(endereco.isEmpty ? 'Endereço não informado' : endereco, style: const TextStyle(fontSize: 16)),
+                  const Divider(height: 24),
+                  const Text('Descrição', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 4),
+                  Text(descricao, style: const TextStyle(fontSize: 16, color: Colors.black87)),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const GradientAppBar(title: 'Mapa de Ocorrências'),
-      body: Column(children: [Padding(padding: const EdgeInsets.fromLTRB(12, 12, 12, 8), child: TextField(controller: _searchController, decoration: InputDecoration(labelText: 'Buscar por rua, bairro, cidade...', prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)), suffixIcon: IconButton(icon: const Icon(Icons.clear), onPressed: () => _searchController.clear())))), Expanded(child: _buildMap())]));
-  }
+    return ChangeNotifierProvider(
+      create: (_) => DenunciaService()..fetchDenuncias(),
+      child: Scaffold(
+        appBar: const GradientAppBar(title: 'Mapa de Ocorrências (OpenStreetMap)'),
+        body: Consumer<DenunciaService>(
+          builder: (context, denunciaService, child) {
+            if (denunciaService.isLoading && denunciaService.denuncias.isEmpty) return const Center(child: CircularProgressIndicator());
+            if (denunciaService.denuncias.isEmpty) return const Center(child: Text('Nenhuma ocorrência para exibir no mapa.'));
 
-  Widget _buildMap() {
-    if (_isLoading) return const Center(child: CircularProgressIndicator());
-    if (_allDenuncias.isEmpty) return const Center(child: Text("Nenhuma ocorrência encontrada."));
+            final markers = _createMarkers(context, denunciaService.denuncias);
 
-    return Stack(alignment: Alignment.center, children: [
-      FlutterMap(
-        mapController: _mapController,
-        options: MapOptions(initialCameraFit: CameraFit.bounds(bounds: LatLngBounds(const LatLng(-2.7, -45.9), const LatLng(-10.9, -40.3)), padding: const EdgeInsets.all(20))),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            // A linha de subdomains foi removida para seguir as boas práticas.
-            retinaMode: true,
-            userAgentPackageName: 'com.example.vector_tracker_app',
-            errorTileCallback: (tile, error, stack) {
-              debugPrint('Falha ao carregar tile do mapa: ${tile.coordinates}, erro: $error');
-            },
-          ),
-          MarkerClusterLayerWidget(
-            options: MarkerClusterLayerOptions(
-              maxClusterRadius: 45,
-              size: const Size(50, 50),
-              markers: _visibleMarkers,
-              polygonOptions: const PolygonOptions(borderColor: Colors.transparent, color: Colors.transparent, borderStrokeWidth: 0),
-              builder: (context, markers) {
-                return SizedBox(
-                  width: 50,
-                  height: 50,
-                  child: Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      Transform.translate(
-                        offset: const Offset(4, -4),
-                        child: const Icon(Icons.location_pin, color: Colors.black38, size: 40),
-                      ),
-                      const Icon(Icons.location_pin, color: Colors.red, size: 40),
-                      SizedBox(
-                        width: 40,
-                        height: 30,
-                        child: Center(
-                          child: Text(
-                            markers.length.toString(),
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+            MapOptions mapOptions;
+            if (markers.length > 1) {
+              final bounds = LatLngBounds.fromPoints(markers.map((m) => m.point).toList());
+              mapOptions = MapOptions(bounds: bounds, boundsOptions: const FitBoundsOptions(padding: EdgeInsets.all(50.0)), interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate));
+            } else {
+              final initialCenter = markers.isNotEmpty ? markers.first.point : const LatLng(-14.235, -51.9253);
+              mapOptions = MapOptions(initialCenter: initialCenter, initialZoom: markers.isNotEmpty ? 15.0 : 4.0, interactionOptions: const InteractionOptions(flags: InteractiveFlag.all & ~InteractiveFlag.rotate));
+            }
+
+            return FlutterMap(
+              options: mapOptions,
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  subdomains: const ['a', 'b', 'c'],
+                  userAgentPackageName: 'com.example.vector_tracker_app',
+                ),
+                if (markers.isNotEmpty)
+                  MarkerClusterLayerWidget(
+                    options: MarkerClusterLayerOptions(
+                      maxClusterRadius: 45,
+                      size: const Size(40, 40),
+                      zoomToBoundsOnClick: true,
+                      markers: markers,
+                      builder: (context, markers) {
+                        return Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(20),
+                            color: Colors.blue,
                           ),
-                        ),
-                      ),
-                    ],
+                          child: Center(
+                            child: Text(
+                              markers.length.toString(),
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                );
-              },
-            ),
-          ),
-        ],
+              ],
+            );
+          },
+        ),
       ),
-      if (_visibleMarkers.isEmpty && _searchController.text.isNotEmpty) Positioned(top: 10, child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), decoration: BoxDecoration(color: Colors.black.withOpacity(0.7), borderRadius: BorderRadius.circular(20)), child: const Text('Nenhum resultado para a sua busca.', style: TextStyle(color: Colors.white))))
-    ]);
+    );
   }
 }
