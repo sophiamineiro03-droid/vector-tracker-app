@@ -1,100 +1,106 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:vector_tracker_app/screens/visit_details_screen.dart';
+import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 
-class PainelAceScreen extends StatelessWidget {
+class PainelAceScreen extends StatefulWidget {
   const PainelAceScreen({super.key});
 
-  Future<void> _navigateToVisit(BuildContext context, DenunciaService service, Map<String, dynamic> denuncia) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => VisitDetailsScreen(denuncia: denuncia)),
-    );
-    service.fetchDenuncias(); // Recarrega os dados ao voltar
+  @override
+  State<PainelAceScreen> createState() => _PainelAceScreenState();
+}
+
+class _PainelAceScreenState extends State<PainelAceScreen> {
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<DenunciaService>(context, listen: false).fetchItems();
+    });
   }
 
-  Future<void> _navigateToNewOccurrence(BuildContext context, DenunciaService service) async {
-    await Navigator.push(
+  Future<void> _navigateToForm(BuildContext context, DenunciaService service, Map<String, dynamic> item) async {
+    final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => VisitDetailsScreen(denuncia: {})),
+      MaterialPageRoute(builder: (context) => RegistroOcorrenciaAgenteScreen(item: item)),
     );
-    service.fetchDenuncias(); // Recarrega os dados ao voltar
+
+    if (result != null && result is Map<String, dynamic>) {
+      service.updateItemInList(result);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => DenunciaService()..fetchDenuncias(),
-      child: Scaffold(
-        appBar: const GradientAppBar(title: 'Lista de Visitas'),
-        body: Consumer<DenunciaService>(
-          builder: (context, denunciaService, child) {
-            if (denunciaService.isLoading && denunciaService.denuncias.isEmpty) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final denuncias = denunciaService.denuncias;
-            if (denuncias.isEmpty) {
-              return RefreshIndicator(
-                onRefresh: () async => denunciaService.fetchDenuncias(),
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  children: const [
-                    Padding(
-                      padding: EdgeInsets.all(48.0),
-                      child: Center(child: Text('Nenhuma ocorrência encontrada.\nPuxe para baixo para atualizar.')),
-                    ),
-                  ],
-                ),
-              );
-            }
-
+    return Scaffold(
+      appBar: const GradientAppBar(title: 'Lista de Visitas'),
+      body: Consumer<DenunciaService>(
+        builder: (context, denunciaService, child) {
+          if (denunciaService.isLoading && denunciaService.items.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final items = denunciaService.items;
+          if (items.isEmpty) {
             return RefreshIndicator(
-              onRefresh: () async => denunciaService.fetchDenuncias(),
-              child: ListView.separated(
-                padding: const EdgeInsets.all(12.0),
-                itemCount: denuncias.length,
-                separatorBuilder: (context, index) => const SizedBox(height: 12),
-                itemBuilder: (context, index) {
-                  final denuncia = denuncias[index];
-                  return CardOcorrencia(
-                    denuncia: denuncia,
-                    onTap: () => _navigateToVisit(context, denunciaService, denuncia),
-                    isPending: denuncia['is_pending'] ?? false,
-                  );
-                },
+              onRefresh: () => denunciaService.fetchItems(),
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: const [
+                  Padding(
+                    padding: EdgeInsets.all(48.0),
+                    child: Center(child: Text('Nenhuma visita ou ocorrência encontrada.\nPuxe para baixo para atualizar.')),
+                  ),
+                ],
               ),
             );
-          },
-        ),
-        floatingActionButton: Consumer<DenunciaService>(
-          builder: (context, service, _) => FloatingActionButton(
-            onPressed: () => _navigateToNewOccurrence(context, service),
-            tooltip: 'Registrar Nova Ocorrência',
-            child: const Icon(Icons.add),
-          ),
+          }
+
+          return RefreshIndicator(
+            onRefresh: () async => denunciaService.fetchItems(),
+            child: ListView.separated(
+              padding: const EdgeInsets.all(12.0),
+              itemCount: items.length,
+              separatorBuilder: (context, index) => const SizedBox(height: 12),
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return CardOcorrencia(
+                  item: item,
+                  onTap: () => _navigateToForm(context, denunciaService, item),
+                );
+              },
+            ),
+          );
+        },
+      ),
+      floatingActionButton: Consumer<DenunciaService>(
+        builder: (context, service, _) => FloatingActionButton(
+          onPressed: () => _navigateToForm(context, service, {}),
+          tooltip: 'Registrar Nova Ocorrência',
+          child: const Icon(Icons.add),
         ),
       ),
     );
   }
 }
 
-// O Widget CardOcorrencia continua o mesmo, sem alterações necessárias.
 class CardOcorrencia extends StatelessWidget {
-  final Map<String, dynamic> denuncia;
+  final Map<String, dynamic> item;
   final VoidCallback onTap;
-  final bool isPending;
 
-  const CardOcorrencia({super.key, required this.denuncia, required this.onTap, this.isPending = false});
+  const CardOcorrencia({super.key, required this.item, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final endereco = _construirEndereco();
-    final data = _formatarData(denuncia['visited_at'] ?? denuncia['created_at']);
-    final status = denuncia['status'] ?? 'Pendente';
+    final isOcorrencia = item['is_ocorrencia'] == true;
+    final isPendingSync = item['is_pending'] == true;
 
+    final title = _construirTitulo(isOcorrencia);
+    final dateStr = isOcorrencia ? item['data_atividade'] : item['created_at'];
+    final date = _formatarData(dateStr);
+    
     return Card(
       elevation: 2.0,
       clipBehavior: Clip.antiAlias,
@@ -105,19 +111,19 @@ class CardOcorrencia extends StatelessWidget {
           padding: const EdgeInsets.all(16.0),
           child: Row(
             children: [
-              _buildStatusIcon(status),
+              _buildStatusIcon(isOcorrencia, isPendingSync),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(endereco, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 4),
-                    Text(data, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
+                    Text(date, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
                   ],
                 ),
               ),
-              if (isPending) ...[
+              if (isPendingSync) ...[
                 const SizedBox(width: 8),
                 const Tooltip(message: 'Pendente de sincronização', child: Icon(Icons.cloud_upload_outlined, size: 20, color: Colors.orange)),
               ],
@@ -130,37 +136,54 @@ class CardOcorrencia extends StatelessWidget {
     );
   }
 
-  String _construirEndereco() {
-    final parts = [denuncia['rua'], denuncia['numero'], denuncia['bairro']].where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
-    return parts.isEmpty ? (denuncia['descricao'] == 'Ocorrência registrada em campo pelo agente.' ? "Nova Ocorrência" : "Endereço não informado") : parts;
+  String _construirTitulo(bool isOcorrencia) {
+    if (isOcorrencia) {
+      final parts = [item['localidade'], item['endereco']].where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
+      return parts.isEmpty ? "Ocorrência de Campo" : parts;
+    } else {
+      final parts = [item['rua'], item['numero'], item['bairro']].where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
+      return parts.isEmpty ? "Denúncia da Comunidade" : parts;
+    }
   }
 
   String _formatarData(String? dataString) {
-    if (dataString == null) return 'Data não disponível';
+    if (dataString == null || dataString.isEmpty) return 'Data não disponível';
+    DateTime? data;
     try {
-      return DateFormat('dd/MM/yyyy').format(DateTime.parse(dataString));
+      data = DateTime.parse(dataString);
     } catch (e) {
-      return 'Data inválida';
+      try {
+        data = DateFormat('dd/MM/yyyy').parse(dataString);
+      } catch (e2) {
+        return 'Data inválida';
+      }
     }
+    return DateFormat('dd/MM/yyyy').format(data);
   }
 
-  Widget _buildStatusIcon(String status) {
-    IconData icon;
-    Color color;
-    switch (status.toLowerCase()) {
-      case 'realizada':
-        icon = Icons.check_circle_rounded;
-        color = Colors.green;
-        break;
-      case 'fechado':
-      case 'recusada':
-        icon = Icons.cancel_rounded;
-        color = Colors.red;
-        break;
-      default: // Pendente
-        icon = Icons.pending_rounded;
-        color = Colors.orange;
+  Widget _buildStatusIcon(bool isOcorrencia, bool isPendingSync) {
+    // Lógica de status corrigida conforme suas regras:
+
+    // 1. É uma ocorrência (nova, editada, etc.)
+    if (isOcorrencia) {
+      // Se está pendente de sync, mostra a nuvem. Senão, o formulário azul.
+      return isPendingSync
+        ? Icon(Icons.cloud_upload_rounded, color: Colors.orange[600], size: 32)
+        : Icon(Icons.description_rounded, color: Colors.indigo[400], size: 32);
     }
-    return Icon(icon, color: color, size: 32);
+    // 2. É uma denúncia (não é uma ocorrência)
+    else {
+        // O status da denúncia (pendente, recusada, etc.) ainda é relevante.
+        final status = item['status']?.toString().toLowerCase() ?? 'pendente';
+        switch (status) {
+          case 'realizada': // Denúncia já convertida
+            return Icon(Icons.check_circle_rounded, color: Colors.green, size: 32);
+          case 'fechado':
+          case 'recusada':
+            return Icon(Icons.cancel_rounded, color: Colors.red, size: 32);
+          default: // 'pendente'
+            return Icon(Icons.pending_rounded, color: Colors.orange, size: 32);
+        }
+    }
   }
 }

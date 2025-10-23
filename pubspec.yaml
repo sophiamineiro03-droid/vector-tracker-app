@@ -21,10 +21,8 @@ dependencies:
 
   # --- DEPENDÊNCIAS DO SISTEMA REATIVO E MAPAS ---
   provider: ^6.1.2
-  flutter_map: ^6.1.0
-  latlong2: ^0.9.0
-  # --- CORREÇÃO: Versão compatível com as dependências atuais ---
-  flutter_map_marker_cluster: ^1.3.6
+  google_maps_flutter: ^2.6.1
+  google_maps_cluster_manager_2: ^3.2.0 # VERSÃO CORRIGIDA para cluster
 
   # --- DEPENDÊNCIAS PARA FUNCIONALIDADE OFFLINE ---
   hive: ^2.2.3

@@ -1,13 +1,11 @@
 import 'dart:io';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:hive/hive.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:uuid/uuid.dart';
-import 'package:vector_tracker_app/main.dart';
+import 'package:provider/provider.dart';
+import 'package:vector_tracker_app/services/denuncia_service.dart';
+import 'package:vector_tracker_app/util/location_util.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 
 class DenunciaScreen extends StatefulWidget {
@@ -59,58 +57,37 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     if (data['image_path'] != null) _imageFile = File(data['image_path']);
   }
 
-  // --- LÓGICA DE LOCALIZAÇÃO MELHORADA ---
   Future<void> _getCurrentLocation() async {
     setState(() {
       _isAddressLoading = true;
-      _locationMessage = "Verificando serviço de localização...";
+      _locationMessage = "Buscando sinal de GPS...";
     });
 
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          await showDialog(
-            context: context,
-            builder: (BuildContext context) => AlertDialog(
-              title: const Text('GPS Desativado'),
-              content: const Text('Para obter a localização, por favor, ative o serviço de localização (GPS) do seu dispositivo.'),
-              actions: <Widget>[
-                TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(context).pop()),
-                TextButton(
-                    child: const Text('Abrir Configurações'),
-                    onPressed: () async {
-                      await Geolocator.openLocationSettings();
-                      Navigator.of(context).pop();
-                    }),
-              ],
-            ),
-          );
+      final position = await LocationUtil.getCurrentPosition();
+      setState(() {
+        _currentPosition = position;
+        _locationMessage = "Coordenadas GPS salvas!";
+      });
+
+      try {
+        setState(() => _locationMessage = "Coordenadas obtidas! Buscando endereço...");
+        List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+        
+        if (placemarks.isNotEmpty) {
+          final p = placemarks[0];
+          _ruaController.text = p.street ?? '';
+          _bairroController.text = p.subLocality ?? '';
+          _cidadeController.text = p.locality ?? '';
+          _estadoController.text = p.administrativeArea ?? '';
+          setState(() => _locationMessage = "Endereço preenchido!\nConfirme os dados e insira o número.");
+        } else {
+          setState(() => _locationMessage = "Coordenadas salvas, mas o endereço não foi encontrado.");
         }
-        setState(() => _locationMessage = "Serviço de localização está desativado.");
-        return;
+      } catch (e) {
+        setState(() => _locationMessage = "Coordenadas GPS salvas.\nPreencha o endereço manualmente.");
       }
-
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) throw Exception('Você negou a permissão de localização.');
-      }
-      if (permission == LocationPermission.deniedForever) throw Exception('Permissão de localização negada permanentemente. Habilite nas configurações do app.');
-
-      setState(() => _locationMessage = "Obtendo coordenadas...");
-      final position = await Geolocator.getCurrentPosition();
-      setState(() { _currentPosition = position; _locationMessage = "Coordenadas obtidas! Buscando endereço..."; });
-
-      List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
-      if (placemarks.isNotEmpty) {
-        final p = placemarks[0];
-        _ruaController.text = p.street ?? '';
-        _bairroController.text = p.subLocality ?? '';
-        _cidadeController.text = p.locality ?? '';
-        _estadoController.text = p.administrativeArea ?? '';
-        setState(() => _locationMessage = "Endereço preenchido! Confirme os dados e insira o número.");
-      }
+      
     } catch (e) {
       final errorMessage = e.toString();
       setState(() => _locationMessage = errorMessage);
@@ -120,9 +97,8 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     }
   }
 
-  // --- LÓGICA DE SELEÇÃO DE IMAGEM MELHORADA ---
   Future<void> _showImageSourceDialog() async {
-    showModalBottomSheet(
+    final source = await showModalBottomSheet<ImageSource>(
       context: context,
       builder: (BuildContext context) {
         return SafeArea(
@@ -134,9 +110,8 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
           ),
         );
       },
-    ).then((source) {
-      if (source != null) _pickImage(source);
-    });
+    );
+    if (source != null) _pickImage(source);
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -148,85 +123,57 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     }
   }
 
+  // --- LÓGICA DE ENVIO CORRIGIDA PARA EDIÇÃO ---
   Future<void> _submitDenuncia() async {
     if (!_formKey.currentState!.validate()) return;
     if (_currentPosition == null && !_isEditing) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('É necessário obter a localização.'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('É necessário obter a localização para registrar a denúncia.'), backgroundColor: Colors.red));
       return;
     }
 
     setState(() => _isLoading = true);
-    final userId = supabase.auth.currentUser?.id;
 
-    final allData = {
-      'id': _isEditing ? widget.denuncia!['id'] : null,
-      'local_id': _isEditing ? widget.denuncia!['local_id'] : const Uuid().v4(),
-      'uid': userId,
+    final denunciaService = Provider.of<DenunciaService>(context, listen: false);
+    
+    final dataToSave = {
+      // Não passamos IDs, o serviço gerencia isso.
       'descricao': _descriptionController.text.trim(),
-      'latitude': _currentPosition?.latitude ?? (widget.denuncia?['latitude'] as num?)?.toDouble(),
-      'longitude': _currentPosition?.longitude ?? (widget.denuncia?['longitude'] as num?)?.toDouble(),
+      'latitude': _currentPosition?.latitude,
+      'longitude': _currentPosition?.longitude,
       'rua': _ruaController.text.trim(),
       'bairro': _bairroController.text.trim(),
       'cidade': _cidadeController.text.trim(),
       'estado': _estadoController.text.trim(),
       'numero': int.tryParse(_numeroController.text.trim()),
-      'created_at': widget.denuncia?['created_at'] ?? DateTime.now().toIso8601String(),
       'image_path': _imageFile?.path,
+      'image_url': _existingImageUrl,
     };
 
-    final connectivityResult = await Connectivity().checkConnectivity();
-    final isOnline = connectivityResult.contains(ConnectivityResult.mobile) || connectivityResult.contains(ConnectivityResult.wifi);
-
     try {
-      if (isOnline) {
-        String? imageUrl = _existingImageUrl;
-        if (_imageFile != null) {
-          final file = File(_imageFile!.path);
-          final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
-          final uploadPath = userId != null ? '$userId/$fileName' : 'anonymous/$fileName';
-          await supabase.storage.from('imagens_denuncias').upload(uploadPath, file);
-          imageUrl = supabase.storage.from('imagens_denuncias').getPublicUrl(uploadPath);
-        }
+      // CORRIGIDO: Passamos o item original para o serviço saber que é uma edição.
+      final result = await denunciaService.saveDenuncia(
+        dataFromForm: dataToSave, 
+        originalItem: _isEditing ? widget.denuncia : null,
+      );
+      final isOnline = !result['is_pending'];
+      
+      final message = isOnline 
+          ? 'Denúncia enviada com sucesso!' 
+          : 'Sem conexão. Salvo localmente para sincronizar depois.';
+      final color = isOnline ? Colors.green : Colors.orange;
 
-        final Map<String, dynamic> dbData = {
-          'descricao': allData['descricao'],
-          'latitude': allData['latitude'],
-          'longitude': allData['longitude'],
-          'rua': allData['rua'],
-          'bairro': allData['bairro'],
-          'cidade': allData['cidade'],
-          'estado': allData['estado'],
-          'numero': allData['numero'],
-          'image_url': imageUrl,
-        };
-
-        if (_isEditing && allData['id'] != null) {
-          await supabase.from('denuncias').update(dbData).eq('id', allData['id']);
-        } else {
-          await supabase.from('denuncias').insert(dbData);
-        }
-        if (allData['local_id'] != null) await Hive.box('pending_denuncias').delete(allData['local_id']);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Denúncia enviada com sucesso!'), backgroundColor: Colors.green));
-          Navigator.of(context).pop(true);
-        }
-      } else {
-        await _saveDenunciaLocally(allData);
-        if (mounted) Navigator.of(context).pop(true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
+        Navigator.of(context).pop(true);
       }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao enviar denúncia: ${e.toString()}'), backgroundColor: Colors.red));
-      await _saveDenunciaLocally(allData, showMessage: false);
-    } finally {
-      if (mounted && _isLoading) setState(() => _isLoading = false);
-    }
-  }
 
-  Future<void> _saveDenunciaLocally(Map<String, dynamic> data, {bool showMessage = true}) async {
-    final Box pendingBox = Hive.box('pending_denuncias');
-    final String localId = data['local_id'] as String;
-    await pendingBox.put(localId, data);
-    if (showMessage && mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sem conexão. Salvo localmente para sincronizar depois.'), backgroundColor: Colors.orange));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ocorreu um erro: $e'), backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -240,10 +187,11 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     super.dispose();
   }
 
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: GradientAppBar(title: _isEditing ? 'Editar Denúncia' : 'Registrar Ocorrência'),
+      appBar: GradientAppBar(title: _isEditing ? 'Editar Denúncia' : 'Registrar Denúncia'),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16.0),
