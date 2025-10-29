@@ -4,8 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:vector_tracker_app/main.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
+import 'package:vector_tracker_app/core/app_logger.dart';
+import 'package:vector_tracker_app/core/exceptions.dart';
+import 'package:vector_tracker_app/core/service_locator.dart';
 
-
+/// Serviço de sincronização usando Hive para armazenamento local
+/// 
+/// ETAPA 2: Refatorado para usar AppLogger e tratamento de erros estruturado.
 class HiveSyncService {
   final DenunciaService _denunciaService;
   final Box _pendingDenunciasBox = Hive.box('pending_denuncias');
@@ -16,51 +21,60 @@ class HiveSyncService {
   HiveSyncService({required DenunciaService denunciaService}) : _denunciaService = denunciaService;
 
   void start() {
-    if (kDebugMode) {
-      print('[SYNC_SERVICE] Iniciado e ouvindo a conectividade.');
-    }
+    AppLogger.sync('Serviço de sincronização iniciado e ouvindo conectividade');
     syncAll();
     Connectivity().onConnectivityChanged.listen((result) {
       final isOnline = result.contains(ConnectivityResult.mobile) || result.contains(ConnectivityResult.wifi);
       if (isOnline) {
-        if (kDebugMode) print('[SYNC_SERVICE] Conexão detectada! Disparando sincronização.');
+        AppLogger.sync('Conexão detectada! Disparando sincronização');
         syncAll();
       }
     });
   }
 
   Future<void> syncAll() async {
-    if (_isSyncing) return;
+    if (_isSyncing) {
+      AppLogger.debug('Sync já em progresso, ignorando');
+      return;
+    }
     _isSyncing = true;
 
-    if (kDebugMode) print('[SYNC_SERVICE] Iniciando syncAll.');
+    AppLogger.sync('Iniciando sincronização de todos os dados pendentes');
     try {
       await _syncPendingOcorrencias();
       await _syncPendingDenuncias();
+    } catch (e, stackTrace) {
+      AppLogger.error('Erro durante sincronização', e, stackTrace);
     } finally {
       _isSyncing = false;
-      if (kDebugMode) print('[SYNC_SERVICE] Finalizado syncAll.');
+      AppLogger.sync('Sincronização finalizada');
     }
   }
 
   Future<void> _syncPendingOcorrencias() async {
-    if (_pendingOcorrenciasBox.isEmpty) return;
-    if (kDebugMode) print("[SYNC_SERVICE] Encontradas ${_pendingOcorrenciasBox.length} ocorrências pendentes.");
+    if (_pendingOcorrenciasBox.isEmpty) {
+      AppLogger.sync('Nenhuma ocorrência pendente para sincronizar');
+      return;
+    }
+    
+    AppLogger.sync('Encontradas ${_pendingOcorrenciasBox.length} ocorrências pendentes');
 
     final List pendingKeys = _pendingOcorrenciasBox.keys.toList();
 
     for (var key in pendingKeys) {
-      final data = Map<String, dynamic>.from(_pendingOcorrenciasBox.get(key) as Map);
-      if (kDebugMode) print('[SYNC_SERVICE] Sincronizando ocorrência $key...');
-
       try {
+        final data = Map<String, dynamic>.from(_pendingOcorrenciasBox.get(key) as Map);
+        AppLogger.sync('Sincronizando ocorrência $key');
+
         final List<String> existingImageUrls = List<String>.from(data['image_urls'] ?? []);
         final List<String> newImageUrls = [];
+        
         if (data['image_paths'] != null) {
           final imagePaths = List<String>.from(data['image_paths']);
           for (String path in imagePaths) {
             final imageFile = File(path);
             if (await imageFile.exists()) {
+              AppLogger.sync('Fazendo upload de imagem: $path');
               final fileName = '${DateTime.now().millisecondsSinceEpoch}_${path.split('/').last}';
               final userId = supabase.auth.currentUser?.id ?? 'anonymous';
               final uploadPath = '$userId/ocorrencias/$fileName';
@@ -85,8 +99,10 @@ class HiveSyncService {
         final recordId = cleanData.remove('id');
         dynamic result;
         if (recordId != null) {
+          AppLogger.sync('Atualizando ocorrência existente $recordId');
           result = await supabase.from('ocorrencias').update(cleanData).eq('id', recordId).select().single();
         } else {
+          AppLogger.sync('Criando nova ocorrência');
           result = await supabase.from('ocorrencias').insert(cleanData).select().single();
         }
 
@@ -97,40 +113,45 @@ class HiveSyncService {
         localDataToUpdate['id'] = result['id'];
 
         _denunciaService.updateItemInList(localDataToUpdate);
-        if (kDebugMode) print('[SYNC_SERVICE] Ocorrência $key SINCROZINADA COM SUCESSO e UI notificada!');
+        AppLogger.sync('✓ Ocorrência $key sincronizada com sucesso');
 
-      } catch (e) {
-        if (kDebugMode) print("[SYNC_SERVICE] Erro ao sincronizar ocorrência $key: $e. Tentará novamente.");
+      } catch (e, stackTrace) {
+        AppLogger.error('Erro ao sincronizar ocorrência $key', e, stackTrace);
+        // Continua para próxima ocorrência
       }
     }
   }
 
 
-  // MODIFICADO: Removido o UID e a dependência de um usuário logado
+  /// ETAPA 2: Refatorado para usar AppLogger
   Future<void> _syncPendingDenuncias() async {
-    if (_pendingDenunciasBox.isEmpty) return;
-    if (kDebugMode) print("[SYNC_SERVICE] Encontradas ${_pendingDenunciasBox.length} denúncias pendentes.");
+    if (_pendingDenunciasBox.isEmpty) {
+      AppLogger.sync('Nenhuma denúncia pendente para sincronizar');
+      return;
+    }
+    
+    AppLogger.sync('Encontradas ${_pendingDenunciasBox.length} denúncias pendentes');
 
     final List pendingKeys = _pendingDenunciasBox.keys.toList();
 
     for (var key in pendingKeys) {
-      final data = Map<String, dynamic>.from(_pendingDenunciasBox.get(key) as Map);
-      if (kDebugMode) print('[SYNC_SERVICE] Sincronizando denúncia $key...');
-
       try {
+        final data = Map<String, dynamic>.from(_pendingDenunciasBox.get(key) as Map);
+        AppLogger.sync('Sincronizando denúncia $key');
+
         String? imageUrl = data['image_url'];
         if (data['image_path'] != null) {
           final imageFile = File(data['image_path']);
           if (await imageFile.exists()) {
+            AppLogger.sync('Fazendo upload de imagem da denúncia: $imageFile');
             final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
-            final uploadPath = 'public/denuncias/$fileName'; // Caminho público
+            final uploadPath = 'public/denuncias/$fileName';
             await supabase.storage.from('imagens_denuncias').upload(uploadPath, imageFile);
             imageUrl = supabase.storage.from('imagens_denuncias').getPublicUrl(uploadPath);
           }
         }
 
         final Map<String, dynamic> cleanData = {
-          // Removido o 'uid'
           'descricao': data['descricao'],
           'latitude': data['latitude'],
           'longitude': data['longitude'],
@@ -146,8 +167,10 @@ class HiveSyncService {
         final recordId = data['id'];
         dynamic result;
         if (recordId != null) {
+          AppLogger.sync('Atualizando denúncia existente $recordId');
           result = await supabase.from('denuncias').update(cleanData).eq('id', recordId).select().single();
         } else {
+          AppLogger.sync('Criando nova denúncia');
           result = await supabase.from('denuncias').insert(cleanData).select().single();
         }
 
@@ -158,10 +181,11 @@ class HiveSyncService {
         localDataToUpdate['id'] = result['id'];
         
         _denunciaService.updateItemInList(localDataToUpdate);
-        if (kDebugMode) print('[SYNC_SERVICE] Denúncia $key SINCROZINADA COM SUCESSO e UI notificada!');
+        AppLogger.sync('✓ Denúncia $key sincronizada com sucesso');
 
-      } catch (e) {
-        if (kDebugMode) print("[SYNC_SERVICE] Erro ao sincronizar denúncia $key: $e. Tentará novamente.");
+      } catch (e, stackTrace) {
+        AppLogger.error('Erro ao sincronizar denúncia $key', e, stackTrace);
+        // Continua para próxima denúncia
       }
     }
   }

@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:vector_tracker_app/services/hive_sync_service.dart';
+import 'package:vector_tracker_app/core/app_logger.dart';
+import 'package:vector_tracker_app/core/exceptions.dart';
 
 class DenunciaService with ChangeNotifier {
   final _supabase = Supabase.instance.client;
@@ -19,6 +21,7 @@ class DenunciaService with ChangeNotifier {
 
   void setSyncService(HiveSyncService syncService) {
     _syncService = syncService;
+    AppLogger.info('Sync service configurado no DenunciaService');
   }
 
   void updateItemInList(Map<String, dynamic> updatedItem) {
@@ -45,47 +48,69 @@ class DenunciaService with ChangeNotifier {
     return data.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
-  // MODIFICADO: Removido o filtro por UID
   Future<void> fetchItems({bool showLoading = true}) async {
-    if (showLoading) _setLoading(true);
-
-    final denunciasCacheBox = Hive.box('denuncias_cache');
-    final ocorrenciasCacheBox = Hive.box('ocorrencias_cache');
-    
-    List<Map<String, dynamic>> onlineDenuncias = [];
-    List<Map<String, dynamic>> onlineOcorrencias = [];
-
     try {
-      final results = await Future.wait([
-        _supabase.from('denuncias').select(),
-        _supabase.from('ocorrencias').select()
-      ]);
+      if (showLoading) _setLoading(true);
+      AppLogger.info('Buscando denúncias e ocorrências');
 
-      onlineDenuncias = _safeCastToList(results[0] as List);
-      onlineOcorrencias = _safeCastToList(results[1] as List);
-
-      await denunciasCacheBox.clear();
-      for (var item in onlineDenuncias) { await denunciasCacheBox.put(item['id'], item); }
+      final denunciasCacheBox = Hive.box('denuncias_cache');
+      final ocorrenciasCacheBox = Hive.box('ocorrencias_cache');
       
-      await ocorrenciasCacheBox.clear();
-      for (var item in onlineOcorrencias) { await ocorrenciasCacheBox.put(item['id'], item); }
+      List<Map<String, dynamic>> onlineDenuncias = [];
+      List<Map<String, dynamic>> onlineOcorrencias = [];
 
-    } catch (e) {
-      if (kDebugMode) {
-        print('Falha ao buscar dados do Supabase. Usando dados do cache. Erro: $e');
+      try {
+        AppLogger.database('Executando queries no Supabase');
+        final results = await Future.wait([
+          _supabase.from('denuncias').select(),
+          _supabase.from('ocorrencias').select()
+        ]);
+
+        onlineDenuncias = _safeCastToList(results[0] as List);
+        onlineOcorrencias = _safeCastToList(results[1] as List);
+
+        AppLogger.database('✓ ${onlineDenuncias.length} denúncias e ${onlineOcorrencias.length} ocorrências obtidas');
+
+        await denunciasCacheBox.clear();
+        for (var item in onlineDenuncias) { 
+          await denunciasCacheBox.put(item['id'], item); 
+        }
+        
+        await ocorrenciasCacheBox.clear();
+        for (var item in onlineOcorrencias) { 
+          await ocorrenciasCacheBox.put(item['id'], item); 
+        }
+
+        AppLogger.database('Cache local atualizado');
+
+      } on PostgrestException catch (e, stackTrace) {
+        AppLogger.error('Erro ao buscar dados do Supabase', e, stackTrace);
+        AppLogger.warning('Usando dados do cache local devido a erro de rede');
+        onlineDenuncias = denunciasCacheBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
+        onlineOcorrencias = ocorrenciasCacheBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
+      } catch (e, stackTrace) {
+        AppLogger.error('Erro inesperado ao buscar dados', e, stackTrace);
+        onlineDenuncias = denunciasCacheBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
+        onlineOcorrencias = ocorrenciasCacheBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
       }
-      onlineDenuncias = denunciasCacheBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
-      onlineOcorrencias = ocorrenciasCacheBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
+
+      final pendingDenunciasBox = Hive.box('pending_denuncias');
+      final pendingOcorrenciasBox = Hive.box('pending_ocorrencias');
+      
+      List<Map<String, dynamic>> pendingDenuncias = pendingDenunciasBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
+      List<Map<String, dynamic>> pendingOcorrencias = pendingOcorrenciasBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
+
+      AppLogger.info('Processando ${pendingDenuncias.length} denúncias e ${pendingOcorrencias.length} ocorrências pendentes');
+
+      _updateAndNotify(onlineDenuncias, pendingDenuncias, onlineOcorrencias, pendingOcorrencias);
+      
+      AppLogger.info('✓ Items atualizados com sucesso');
+      
+    } catch (e, stackTrace) {
+      AppLogger.error('Erro crítico ao buscar items', e, stackTrace);
+    } finally {
+      if (showLoading) _setLoading(false);
     }
-
-    final pendingDenunciasBox = Hive.box('pending_denuncias');
-    final pendingOcorrenciasBox = Hive.box('pending_ocorrencias');
-    
-    List<Map<String, dynamic>> pendingDenuncias = pendingDenunciasBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
-    List<Map<String, dynamic>> pendingOcorrencias = pendingOcorrenciasBox.values.whereType<Map>().map((d) => Map<String, dynamic>.from(d)).toList();
-
-    _updateAndNotify(onlineDenuncias, pendingDenuncias, onlineOcorrencias, pendingOcorrencias);
-    if (showLoading) _setLoading(false);
   }
 
   void _updateAndNotify(
@@ -126,6 +151,7 @@ class DenunciaService with ChangeNotifier {
               'rua': originalDenuncia['rua'],
               'numero': originalDenuncia['numero'],
               'bairro': originalDenuncia['bairro'],
+              'created_at': originalDenuncia['created_at'],
             };
           }
         }
@@ -158,119 +184,68 @@ class DenunciaService with ChangeNotifier {
         final dateB = DateTime.tryParse(dateBStr) ?? DateFormat('dd/MM/yyyy').parse(dateBStr);
         return dateB.compareTo(dateA);
       } catch (e) {
-        if (kDebugMode) print("Erro ao ordenar datas: $e. Strings de data: '$dateAStr', '$dateBStr'");
+        AppLogger.warning("Erro ao ordenar datas: $e. Strings: '$dateAStr', '$dateBStr'");
         return 0;
       }
     });
   }
 
-  // MODIFICADO: Removido o UID da criação de nova denúncia
-  Future<Map<String, dynamic>> saveDenuncia({ required Map<String, dynamic> dataFromForm, Map<String, dynamic>? originalItem }) async {
-    final pendingDenunciasBox = Hive.box('pending_denuncias');
-    final connectivityResult = await (Connectivity().checkConnectivity());
-    final isOnline = connectivityResult.contains(ConnectivityResult.mobile) || connectivityResult.contains(ConnectivityResult.wifi);
-    final isEditing = originalItem != null;
-
-    Map<String, dynamic> denunciaPayload;
-    dynamic denunciaKey;
-
-    if (isEditing) {
-      denunciaKey = originalItem['local_id'] ?? originalItem['id'];
-      denunciaPayload = {
-        ...originalItem,
-        ...dataFromForm,
-        'local_id': denunciaKey,
-        'is_pending': !isOnline, 
-      };
-    } else {
-      denunciaKey = _uuid.v4();
-      denunciaPayload = {
-        ...dataFromForm,
-        'local_id': denunciaKey,
-        'is_ocorrencia': false,
-        'is_pending': !isOnline,
-        'status': 'pendente',
-        'created_at': DateTime.now().toIso8601String(),
-      };
-    }
-
-    await pendingDenunciasBox.put(denunciaKey, denunciaPayload);
-    
-    if (isOnline) {
-      _syncService.syncAll();
-    }
-
-    updateItemInList(denunciaPayload);
-    return denunciaPayload;
-  }
-
-  Future<Map<String, dynamic>> saveOcorrencia({
-    required Map<String, dynamic> dataFromForm,
-    required Map<String, dynamic> originalItem, 
+  Future<Map<String, dynamic>> saveDenuncia({ 
+    required Map<String, dynamic> dataFromForm, 
+    Map<String, dynamic>? originalItem 
   }) async {
-    final pendingOcorrenciasBox = Hive.box('pending_ocorrencias');
-    final pendingDenunciasBox = Hive.box('pending_denuncias');
-    final connectivityResult = await (Connectivity().checkConnectivity());
-    final isOnline = connectivityResult.contains(ConnectivityResult.mobile) || connectivityResult.contains(ConnectivityResult.wifi);
+    try {
+      AppLogger.info('Salvando denúncia ${originalItem != null ? "(editando)" : "(nova)"}');
+      
+      final pendingDenunciasBox = Hive.box('pending_denuncias');
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final isOnline = connectivityResult.contains(ConnectivityResult.mobile) || 
+                      connectivityResult.contains(ConnectivityResult.wifi);
+      final isEditing = originalItem != null;
 
-    final isNewRecord = originalItem.isEmpty;
-    final isConvertingDenuncia = originalItem.isNotEmpty && originalItem['is_ocorrencia'] == false;
+      Map<String, dynamic> denunciaPayload;
+      dynamic denunciaKey;
 
-    Map<String, dynamic> ocorrenciaPayload;
-    dynamic ocorrenciaKey;
-
-    if (isNewRecord || isConvertingDenuncia) {
-      ocorrenciaKey = _uuid.v4();
-      ocorrenciaPayload = {
-        ...dataFromForm,
-        'local_id': ocorrenciaKey,
-        'created_at': DateTime.now().toIso8601String(),
-        'uid': _supabase.auth.currentUser?.id,
-        'is_ocorrencia': true,
-        'is_pending': !isOnline,
-      };
-      if (isConvertingDenuncia) {
-        final denunciaOrigemId = originalItem['id'] ?? originalItem['local_id'];
-        ocorrenciaPayload['denuncia_id_origem'] = denunciaOrigemId;
-        ocorrenciaPayload['original_denuncia_context'] = {
-          'image_url': originalItem['image_url'],
-          'descricao': originalItem['descricao'],
-          'rua': originalItem['rua'],
-          'numero': originalItem['numero'],
-          'bairro': originalItem['bairro'],
-          'created_at': originalItem['created_at'],
-        };
-      }
-    } else { // isEditingOcorrencia
-      ocorrenciaKey = originalItem['local_id'] ?? originalItem['id'];
-      ocorrenciaPayload = {
-        ...originalItem,
-        ...dataFromForm,
-        'local_id': ocorrenciaKey,
-        'is_pending': !isOnline, 
-      };
-    }
-    
-    await pendingOcorrenciasBox.put(ocorrenciaKey, ocorrenciaPayload);
-
-    if (isConvertingDenuncia) {
-      final denunciaKey = originalItem['id'] ?? originalItem['local_id'];
-      if (denunciaKey != null) {
-        final denunciaUpdatePayload = {
+      if (isEditing) {
+        denunciaKey = originalItem['local_id'] ?? originalItem['id'];
+        denunciaPayload = {
           ...originalItem,
-          'status': 'realizada',
-          'is_pending': !isOnline,
+          ...dataFromForm,
+          'local_id': denunciaKey,
+          'is_pending': !isOnline, 
         };
-        await pendingDenunciasBox.put(denunciaKey, denunciaUpdatePayload);
+        AppLogger.info('Editando denúncia existente: $denunciaKey');
+      } else {
+        denunciaKey = _uuid.v4();
+        denunciaPayload = {
+          ...dataFromForm,
+          'local_id': denunciaKey,
+          'is_ocorrencia': false,
+          'is_pending': !isOnline,
+          'status': 'pendente',
+          'created_at': DateTime.now().toIso8601String(),
+        };
+        AppLogger.info('Criando nova denúncia: $denunciaKey');
       }
-    }
 
-    if (isOnline) {
+      await pendingDenunciasBox.put(denunciaKey, denunciaPayload);
+      
+      if (isOnline) {
+        AppLogger.sync('Conectado online, disparando sincronização');
         _syncService.syncAll();
-    }
+      } else {
+        AppLogger.warning('Offline, denúncia será sincronizada depois');
+      }
 
-    updateItemInList(ocorrenciaPayload); // Atualiza a ocorrência na UI
-    return ocorrenciaPayload;
+      updateItemInList(denunciaPayload);
+      AppLogger.info('✓ Denúncia salva com sucesso');
+      
+      return denunciaPayload;
+      
+    } catch (e, stackTrace) {
+      AppLogger.error('Erro ao salvar denúncia', e, stackTrace);
+      rethrow;
+    }
   }
 
   void _setLoading(bool loading) {
@@ -281,6 +256,7 @@ class DenunciaService with ChangeNotifier {
   }
 
   void forceRefresh() {
+    AppLogger.info('Force refresh solicitado');
     fetchItems(showLoading: true);
   }
 }
