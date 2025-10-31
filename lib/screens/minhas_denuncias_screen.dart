@@ -2,143 +2,178 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:vector_tracker_app/main.dart';
 import 'package:vector_tracker_app/screens/denuncia_screen.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
-import 'package:vector_tracker_app/widgets/smart_image.dart';
 
-class MinhasDenunciasScreen extends StatefulWidget {
+class MinhasDenunciasScreen extends StatelessWidget {
   const MinhasDenunciasScreen({super.key});
 
   @override
-  State<MinhasDenunciasScreen> createState() => _MinhasDenunciasScreenState();
-}
-
-class _MinhasDenunciasScreenState extends State<MinhasDenunciasScreen> {
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // CORRIGIDO: Chamada sem UID
-      Provider.of<DenunciaService>(context, listen: false).fetchItems();
-    });
-  }
-
-  Future<void> _navigateToDenuncia(BuildContext context, Map<String, dynamic> denuncia) async {
-    final result = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (context) => DenunciaScreen(denuncia: denuncia)),
-    );
-    if (result == true && mounted) {
-       Provider.of<DenunciaService>(context, listen: false).fetchItems();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final denunciaService = Provider.of<DenunciaService>(context);
-
-    // CORRIGIDO: Filtro sem UID
-    final denuncias = denunciaService.items.where((item) {
-      return item['is_ocorrencia'] != true;
-    }).toList();
-
     return Scaffold(
       appBar: const GradientAppBar(title: 'Minhas Denúncias'),
-      body: RefreshIndicator(
-        // CORRIGIDO: Chamada de atualização sem UID
-        onRefresh: () => denunciaService.fetchItems(),
-        child: denunciaService.isLoading && denuncias.isEmpty
-            ? const Center(child: CircularProgressIndicator())
-            : denuncias.isEmpty
-                ? ListView( // Permite o RefreshIndicator em lista vazia
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: const [Padding(padding: EdgeInsets.all(48.0), child: Center(child: Text('Nenhuma denúncia encontrada.\nArraste para baixo para atualizar.')))],
-                  )
-                : ListView.separated(
-                    padding: const EdgeInsets.all(12.0),
-                    itemCount: denuncias.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final denuncia = denuncias[index];
-                      return _CardDenuncia(
-                        denuncia: denuncia,
-                        onTap: () => _navigateToDenuncia(context, denuncia),
-                      );
-                    },
-                  ),
+      body: Consumer<DenunciaService>(
+        builder: (context, denunciaService, child) {
+          if (denunciaService.isLoading && denunciaService.items.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          
+          final minhasDenuncias = denunciaService.items
+              .where((item) => item['is_ocorrencia'] != true)
+              .toList();
+
+          if (minhasDenuncias.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(48.0),
+                child: Text(
+                  'Nenhuma denúncia registrada por você.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+            );
+          }
+
+          return RefreshIndicator(
+            onRefresh: () => denunciaService.fetchItems(showLoading: true),
+            child: ListView.builder(
+              padding: const EdgeInsets.all(12.0),
+              itemCount: minhasDenuncias.length,
+              itemBuilder: (context, index) {
+                final denuncia = minhasDenuncias[index];
+                return DenunciaCard(denuncia: denuncia);
+              },
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-class _CardDenuncia extends StatelessWidget {
+class DenunciaCard extends StatelessWidget {
   final Map<String, dynamic> denuncia;
-  final VoidCallback onTap;
 
-  const _CardDenuncia({required this.denuncia, required this.onTap});
+  const DenunciaCard({super.key, required this.denuncia});
+
+  String _formatarData(String? dataString) {
+    if (dataString == null) return 'Data não informada';
+    try {
+      final data = DateTime.parse(dataString);
+      return DateFormat("dd/MM/yyyy 'às' HH:mm").format(data);
+    } catch (e) {
+      return 'Data inválida';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final endereco = [denuncia['rua'], denuncia['bairro']].where((s) => s != null && s.toString().isNotEmpty).join(', ');
-    final data = denuncia['created_at'];
-    final imageSource = denuncia['image_path'] ?? denuncia['image_url'];
+    final status = denuncia['status']?.toString().toLowerCase() ?? 'pendente';
+    final imagePath = denuncia['image_path'] as String?;
+    final imageUrl = denuncia['image_url'] as String?;
+
+    Widget imageWidget;
+    if (imagePath != null) {
+      imageWidget = Image.file(File(imagePath), fit: BoxFit.cover);
+    } else if (imageUrl != null) {
+      imageWidget = Image.network(imageUrl, fit: BoxFit.cover);
+    } else {
+      imageWidget = const SizedBox.shrink(); // Não mostra nada se não houver imagem
+    }
 
     return Card(
-      elevation: 2.0,
       clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 3,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: ListTile(
-        contentPadding: const EdgeInsets.all(10),
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: SizedBox(
-            width: 72, height: 72,
-            child: SmartImage(imageSource: imageSource, fit: BoxFit.cover),
-          ),
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => DenunciaScreen(denuncia: denuncia),
+            ),
+          );
+        },
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (imagePath != null || imageUrl != null)
+              SizedBox(
+                height: 180,
+                width: double.infinity,
+                child: imageWidget,
+              ),
+            Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Registrado em: ${_formatarData(denuncia['created_at'])}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      _buildStatusChip(status),
+                      const Spacer(),
+                      const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        title: Text(endereco.isEmpty ? 'Denúncia em ${denuncia['cidade'] ?? 'local'}' : endereco, style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text(data != null ? DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(data)) : 'Sem data'),
-        trailing: _buildStatusIcon(denuncia),
-        onTap: onTap,
       ),
     );
   }
 
-  Widget _buildStatusIcon(Map<String, dynamic> item) {
-    final bool isPending = item['is_pending'] == true;
-    final String status = item['status']?.toString().toLowerCase() ?? 'pendente';
-    if (isPending) {
-      return const Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.cloud_upload_outlined, color: Colors.orange, size: 28),
-          SizedBox(height: 2),
-          Text('Pendente', style: TextStyle(fontSize: 10, color: Colors.orange)),
-        ],
-      );
-    }
+  Widget _buildStatusChip(String status) {
+    Color chipColor;
+    String label;
+    IconData icon;
+
     switch (status) {
       case 'realizada':
-        return const Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.check_circle_outline, color: Colors.green, size: 28),
-            SizedBox(height: 2),
-            Text('Recebida', style: TextStyle(fontSize: 10, color: Colors.green)),
-          ],
-        );
+        chipColor = Colors.green;
+        label = 'VISITA REALIZADA';
+        icon = Icons.check_circle_outline;
+        break;
+      case 'recusada':
+      case 'fechado':
+        chipColor = Colors.red;
+        label = 'NÃO ATENDIDA';
+        icon = Icons.cancel_outlined;
+        break;
+      case 'pendente':
       default:
-        return const Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.hourglass_top_outlined, color: Colors.blue, size: 28),
-            SizedBox(height: 2),
-            Text('Enviada', style: TextStyle(fontSize: 10, color: Colors.blue)),
-          ],
-        );
+        chipColor = Colors.orange;
+        label = 'AGUARDANDO VISITA';
+        icon = Icons.hourglass_empty_rounded;
+        break;
     }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: chipColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: chipColor, width: 0.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: chipColor, size: 14),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(color: chipColor, fontWeight: FontWeight.bold, fontSize: 11),
+          ),
+        ],
+      ),
+    );
   }
 }

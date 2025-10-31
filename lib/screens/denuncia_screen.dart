@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/util/location_util.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
+import 'package:connectivity_plus/connectivity_plus.dart'; // Importar o Connectivity Plus
 
 class DenunciaScreen extends StatefulWidget {
   final Map<String, dynamic>? denuncia;
@@ -123,7 +124,6 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     }
   }
 
-  // --- LÓGICA DE ENVIO CORRIGIDA PARA EDIÇÃO ---
   Future<void> _submitDenuncia() async {
     if (!_formKey.currentState!.validate()) return;
     if (_currentPosition == null && !_isEditing) {
@@ -136,7 +136,6 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     final denunciaService = Provider.of<DenunciaService>(context, listen: false);
     
     final dataToSave = {
-      // Não passamos IDs, o serviço gerencia isso.
       'descricao': _descriptionController.text.trim(),
       'latitude': _currentPosition?.latitude,
       'longitude': _currentPosition?.longitude,
@@ -150,12 +149,15 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     };
 
     try {
-      // CORRIGIDO: Passamos o item original para o serviço saber que é uma edição.
-      final result = await denunciaService.saveDenuncia(
+      // O saveDenuncia vai salvar localmente e o syncService, que está rodando em background, cuidará do envio.
+      await denunciaService.saveDenuncia(
         dataFromForm: dataToSave, 
         originalItem: _isEditing ? widget.denuncia : null,
       );
-      final isOnline = !result['is_pending'];
+      
+      // CORREÇÃO: A verificação de conexão é feita aqui, na UI, para dar o feedback correto.
+      final connectivityResult = await (Connectivity().checkConnectivity());
+      final isOnline = !connectivityResult.contains(ConnectivityResult.none);
       
       final message = isOnline 
           ? 'Denúncia enviada com sucesso!' 

@@ -562,7 +562,10 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
   Widget _buildVisitDetailsHeader() {
     final contextData = widget.item['original_denuncia_context'] ?? widget.item;
 
+    final imagePath = contextData['image_path'] as String?;
     final imageUrl = contextData['image_url'] as String?;
+    final imageSource = imagePath ?? imageUrl;
+
     final descricao = contextData['descricao'] ?? 'Nenhuma descrição fornecida.';
     final endereco = [
       contextData['rua'], 
@@ -581,20 +584,21 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
           children: [
             _buildSectionTitle('Contexto da Denúncia Original'),
             const SizedBox(height: 16),
-            if (imageUrl != null)
-              Center(
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8.0),
-                  child: Image.network(imageUrl, height: 200, width: double.infinity, fit: BoxFit.cover, errorBuilder: (c, e, s) => const Icon(Icons.broken_image, size: 48, color: Colors.grey)),
+            Center(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8.0),
+                child: SizedBox(
+                  height: 200,
+                  width: double.infinity,
+                  child: imageSource != null
+                    ? SmartImage(imageSource: imageSource)
+                    : Container(
+                        color: Colors.grey[200],
+                        child: const Center(child: Icon(Icons.image_not_supported, size: 48, color: Colors.grey)),
+                      ),
                 ),
-              )
-            else
-              Container(
-                height: 200,
-                width: double.infinity,
-                color: Colors.grey[200],
-                child: const Center(child: Icon(Icons.image_not_supported, size: 48, color: Colors.grey)),
               ),
+            ),
             const SizedBox(height: 16),
             const Text('Localização Informada:', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 4),

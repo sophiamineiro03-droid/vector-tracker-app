@@ -13,14 +13,7 @@ class PainelAceScreen extends StatefulWidget {
 }
 
 class _PainelAceScreenState extends State<PainelAceScreen> {
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<DenunciaService>(context, listen: false).fetchItems();
-    });
-  }
+  // A chamada inicial de fetchItems() foi removida daqui, pois agora está no construtor do serviço.
 
   Future<void> _navigateToForm(BuildContext context, DenunciaService service, Map<String, dynamic> item) async {
     final result = await Navigator.push(
@@ -29,7 +22,9 @@ class _PainelAceScreenState extends State<PainelAceScreen> {
     );
 
     if (result != null && result is Map<String, dynamic>) {
-      service.updateItemInList(result);
+      // A atualização da lista agora é tratada pelo DenunciaService globalmente
+      // Não é mais necessário chamar o updateItemInList daqui.
+      service.forceRefresh(); // Apenas força uma atualização para garantir consistência
     }
   }
 
@@ -59,7 +54,7 @@ class _PainelAceScreenState extends State<PainelAceScreen> {
           }
 
           return RefreshIndicator(
-            onRefresh: () async => denunciaService.fetchItems(),
+            onRefresh: () => denunciaService.fetchItems(showLoading: true),
             child: ListView.separated(
               padding: const EdgeInsets.all(12.0),
               itemCount: items.length,
@@ -97,7 +92,7 @@ class CardOcorrencia extends StatelessWidget {
     final isOcorrencia = item['is_ocorrencia'] == true;
     final isPendingSync = item['is_pending'] == true;
 
-    final title = _construirTitulo(isOcorrencia);
+    final title = _construirTitulo();
     final dateStr = isOcorrencia ? item['data_atividade'] : item['created_at'];
     final date = _formatarData(dateStr);
     
@@ -111,7 +106,7 @@ class CardOcorrencia extends StatelessWidget {
           padding: const EdgeInsets.all(16.0),
           child: Row(
             children: [
-              _buildStatusIcon(isOcorrencia, isPendingSync),
+              _buildStatusIcon(isOcorrencia, item['status']?.toString().toLowerCase() ?? 'pendente'),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -136,7 +131,8 @@ class CardOcorrencia extends StatelessWidget {
     );
   }
 
-  String _construirTitulo(bool isOcorrencia) {
+  String _construirTitulo() {
+    final isOcorrencia = item['is_ocorrencia'] == true;
     if (isOcorrencia) {
       final parts = [item['localidade'], item['endereco']].where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
       return parts.isEmpty ? "Ocorrência de Campo" : parts;
@@ -161,29 +157,18 @@ class CardOcorrencia extends StatelessWidget {
     return DateFormat('dd/MM/yyyy').format(data);
   }
 
-  Widget _buildStatusIcon(bool isOcorrencia, bool isPendingSync) {
-    // Lógica de status corrigida conforme suas regras:
-
-    // 1. É uma ocorrência (nova, editada, etc.)
-    if (isOcorrencia) {
-      // Se está pendente de sync, mostra a nuvem. Senão, o formulário azul.
-      return isPendingSync
-        ? Icon(Icons.cloud_upload_rounded, color: Colors.orange[600], size: 32)
-        : Icon(Icons.description_rounded, color: Colors.indigo[400], size: 32);
+  Widget _buildStatusIcon(bool isOcorrencia, String status) {
+    if (isOcorrencia || status == 'realizada') {
+      return Icon(Icons.check_circle_rounded, color: Colors.green, size: 32);
     }
-    // 2. É uma denúncia (não é uma ocorrência)
-    else {
-        // O status da denúncia (pendente, recusada, etc.) ainda é relevante.
-        final status = item['status']?.toString().toLowerCase() ?? 'pendente';
-        switch (status) {
-          case 'realizada': // Denúncia já convertida
-            return Icon(Icons.check_circle_rounded, color: Colors.green, size: 32);
-          case 'fechado':
-          case 'recusada':
-            return Icon(Icons.cancel_rounded, color: Colors.red, size: 32);
-          default: // 'pendente'
-            return Icon(Icons.pending_rounded, color: Colors.orange, size: 32);
-        }
+
+    switch (status) {
+      case 'fechado':
+      case 'recusada':
+        return Icon(Icons.cancel_rounded, color: Colors.red, size: 32);
+      case 'pendente':
+      default:
+        return Icon(Icons.pending_rounded, color: Colors.orange, size: 32);
     }
   }
 }
