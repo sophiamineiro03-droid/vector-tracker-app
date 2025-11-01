@@ -8,15 +8,44 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  int _selectedTab = 0; // 0 para Comunidade, 1 para Agente
-  bool _obscureText = true; // Para controlar a visibilidade da senha
+  int _selectedTab = 1; // 0 para Comunidade, 1 para Agente
+  bool _isLoading = false;
+  bool _obscureText = true;
+
+  // Os controllers são mantidos apenas para a UI, sem uso na lógica.
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  // Lógica de navegação direta, sem validações.
+  void _handleEnter() {
+    setState(() => _isLoading = true);
+
+    // Navega diretamente para a tela selecionada, espelhando o comportamento da aba "Comunidade".
+    if (_selectedTab == 1) { // Agente
+      Navigator.pushReplacementNamed(context, '/agent_home');
+    } else { // Comunidade
+      Navigator.pushReplacementNamed(context, '/community_home');
+    }
+    
+    // O setState abaixo pode não ser chamado se a navegação for muito rápida,
+    // mas é uma boa prática para caso a navegação seja impedida no futuro.
+    if(mounted) {
+      setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final Color accentColor = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
-      // 1. Fundo degradê restaurado
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -31,96 +60,55 @@ class _LoginScreenState extends State<LoginScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 400),
-                // 2. Formulário dentro de um Card branco puro
                 child: Card(
-                  color: Colors.white, // Garante o fundo branco puro
+                  color: Colors.white,
                   elevation: 8.0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
                   child: Padding(
                     padding: const EdgeInsets.all(24.0),
-                    // 3. Conteúdo que você gostou, mantido dentro do Card
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Image.asset('assets/logo.png', height: 100),
                         const SizedBox(height: 24.0),
-
                         _buildTabSelector(context, accentColor),
                         const SizedBox(height: 24.0),
-
                         TextFormField(
+                          controller: _emailController,
                           decoration: InputDecoration(
                             labelText: 'Email',
                             prefixIcon: const Icon(Icons.email_outlined),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12.0),
-                            ),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
                           ),
                           keyboardType: TextInputType.emailAddress,
                         ),
                         const SizedBox(height: 16.0),
-
                         TextFormField(
+                          controller: _passwordController,
                           obscureText: _obscureText,
                           decoration: InputDecoration(
                             labelText: 'Senha',
                             prefixIcon: const Icon(Icons.lock_outline),
                             suffixIcon: IconButton(
-                              icon: Icon(
-                                _obscureText ? Icons.visibility_off : Icons.visibility,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _obscureText = !_obscureText;
-                                });
-                              },
+                              icon: Icon(_obscureText ? Icons.visibility_off : Icons.visibility),
+                              onPressed: () => setState(() => _obscureText = !_obscureText),
                             ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12.0),
-                            ),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
                           ),
                         ),
                         const SizedBox(height: 24.0),
-
                         ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: accentColor,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12.0),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
                           ),
-                          onPressed: () {
-                            if (_selectedTab == 0) {
-                              Navigator.pushReplacementNamed(context, '/community_home');
-                            } else {
-                              Navigator.pushReplacementNamed(context, '/agent_home');
-                            }
-                          },
-                          child: const Text('Entrar',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        ),
-                        const SizedBox(height: 16.0),
-
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Text("Não tem uma conta?", style: TextStyle(color: Colors.black54)),
-                            TextButton(
-                              onPressed: () {
-                                // Ação de cadastro será implementada depois
-                              },
-                              child: Text(
-                                'Cadastre-se',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: accentColor,
-                                ),
-                              ),
-                            ),
-                          ],
+                          onPressed: _isLoading ? null : _handleEnter,
+                          child: _isLoading 
+                              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3)) 
+                              : const Text('Entrar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                         ),
                       ],
                     ),
@@ -149,16 +137,11 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _buildTabItem(
-      BuildContext context, String title, int index, Color accentColor) {
+  Widget _buildTabItem(BuildContext context, String title, int index, Color accentColor) {
     final isSelected = _selectedTab == index;
     return Expanded(
       child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _selectedTab = index;
-          });
-        },
+        onTap: () => setState(() => _selectedTab = index),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
@@ -168,10 +151,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Text(
             title,
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: isSelected ? Colors.white : Colors.black54,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: isSelected ? Colors.white : Colors.black54, fontWeight: FontWeight.bold),
           ),
         ),
       ),
