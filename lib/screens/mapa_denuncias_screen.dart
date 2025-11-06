@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:google_maps_cluster_manager_2/google_maps_cluster_manager_2.dart';
@@ -9,16 +10,18 @@ import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 
 class Place with ClusterItem {
-  final Map<String, dynamic> denuncia;
+  final Map<String, dynamic> item;
 
-  Place({required this.denuncia});
+  Place({required this.item});
 
   @override
   LatLng get location {
-    final lat = _parseDouble(denuncia['latitude']);
-    final lon = _parseDouble(denuncia['longitude']);
+    final lat = _parseDouble(item['latitude']);
+    final lon = _parseDouble(item['longitude']);
     return LatLng(lat ?? 0.0, lon ?? 0.0);
   }
+
+  bool get isMock => item['is_mock'] == true;
 
   static double? _parseDouble(dynamic value) {
     if (value == null) return null;
@@ -46,28 +49,50 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
   void initState() {
     super.initState();
     _clusterManager = _initClusterManager();
-    // Garante que a busca de dados ocorra após a construção da primeira frame
+    
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _denunciaService = Provider.of<DenunciaService>(context, listen: false);
-      _denunciaService.addListener(_updateDenunciasOnMap);
-      _denunciaService.fetchItems();
+      _denunciaService.addListener(_updateItemsOnMap);
+      _updateItemsOnMap();
     });
   }
 
-  // O didChangeDependencies não é mais necessário para a busca inicial
+  List<Map<String, dynamic>> _getMockItems() {
+    final random = Random();
+    final mockLocations = [
+      {'lat': -5.09, 'lng': -42.81, 'is_ocorrencia': true},
+      {'lat': -2.90, 'lng': -41.77, 'is_ocorrencia': true},
+      {'lat': -7.07, 'lng': -41.46, 'is_ocorrencia': true},
+      {'lat': -6.76, 'lng': -43.02, 'is_ocorrencia': false},
+      {'lat': -7.22, 'lng': -44.55, 'is_ocorrencia': false},
+      {'lat': -9.07, 'lng': -44.35, 'is_ocorrencia': false},
+      {'lat': -8.28, 'lng': -43.68, 'is_ocorrencia': false},
+    ];
 
-  void _updateDenunciasOnMap() {
+    return mockLocations.map((loc) {
+      final lat = (loc['lat'] as double) + (random.nextDouble() - 0.5) * 0.05;
+      final lng = (loc['lng'] as double) + (random.nextDouble() - 0.5) * 0.05;
+      return {
+        'id': 'mock_${loc['lat']}', 
+        'latitude': lat,
+        'longitude': lng,
+        'is_ocorrencia': loc['is_ocorrencia'],
+        'is_mock': true, // Flag para identificar que é um pin falso
+      };
+    }).toList();
+  }
+
+  void _updateItemsOnMap() {
     if (mounted) {
-      final denuncias = _denunciaService.items.where((item) => 
-        item['is_ocorrencia'] != true && 
+      final realItems = _denunciaService.items.where((item) => 
         Place._parseDouble(item['latitude']) != null && 
         Place._parseDouble(item['longitude']) != null
       ).toList();
 
-      final places = _getPlaces(denuncias);
-      if (places.isNotEmpty) {
-        _clusterManager.setItems(places);
-      }
+      final allItems = [...realItems, ..._getMockItems()];
+
+      final places = _getPlaces(allItems);
+      _clusterManager.setItems(places);
     }
   }
 
@@ -85,15 +110,14 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
 
   @override
   void dispose() {
-    _denunciaService.removeListener(_updateDenunciasOnMap);
+    _denunciaService.removeListener(_updateItemsOnMap);
     super.dispose();
   }
-
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const GradientAppBar(title: 'Mapa de Denúncias'),
+      appBar: const GradientAppBar(title: 'Mapa de Ocorrências'),
       body: Consumer<DenunciaService>(
         builder: (context, denunciaService, child) {
           return Stack(
@@ -101,7 +125,7 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
               GoogleMap(
                 mapType: MapType.normal,
                 initialCameraPosition: const CameraPosition(
-                    target: LatLng(-14.235, -51.9253), zoom: 4.0),
+                    target: LatLng(-7.0, -43.0), zoom: 6.0),
                 markers: _markers,
                 onMapCreated: (GoogleMapController controller) {
                   _controller.complete(controller);
@@ -121,8 +145,8 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
     );
   }
 
-  List<Place> _getPlaces(List<Map<String, dynamic>> denuncias) {
-    return denuncias.map((d) => Place(denuncia: d)).toList();
+  List<Place> _getPlaces(List<Map<String, dynamic>> items) {
+    return items.map((i) => Place(item: i)).toList();
   }
 
   LatLngBounds _boundsFromCluster(Cluster<Place> cluster) {
@@ -145,29 +169,24 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
     );
   }
 
-
   Future<Marker> Function(Cluster<Place>) get _markerBuilder => (cluster) async {
     if (!cluster.isMultiple) {
       final place = cluster.items.first;
-      final isPending = place.denuncia['is_pending'] ?? false;
-      final status = place.denuncia['status']?.toString().toLowerCase() ?? 'pendente';
+      final isOcorrencia = place.item['is_ocorrencia'] == true;
 
-      double markerColorHue;
-      if (isPending) {
-        markerColorHue = BitmapDescriptor.hueOrange;
-      } else if (status == 'realizada') {
-        markerColorHue = BitmapDescriptor.hueGreen;
-      } else if (status == 'fechado' || status == 'recusada') {
-        markerColorHue = BitmapDescriptor.hueRed;
-      } else {
-        markerColorHue = BitmapDescriptor.hueAzure;
-      }
+      final markerColor = isOcorrencia
+        ? BitmapDescriptor.hueGreen 
+        : BitmapDescriptor.hueAzure;
 
       return Marker(
           markerId: MarkerId(cluster.getId()),
           position: cluster.location,
-          onTap: () => _showDenunciaDetails(context, place.denuncia),
-          icon: BitmapDescriptor.defaultMarkerWithHue(markerColorHue));
+          onTap: () {
+            if (!place.isMock) {
+              _showItemDetails(context, place.item);
+            }
+          },
+          icon: BitmapDescriptor.defaultMarkerWithHue(markerColor));
     }
 
     final int size = cluster.count;
@@ -195,7 +214,7 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
   Future<BitmapDescriptor> _getMarkerBitmap(int size, {required String text}) async {
     final ui.PictureRecorder pictureRecorder = ui.PictureRecorder();
     final Canvas canvas = Canvas(pictureRecorder);
-    final Paint paint1 = Paint()..color = Colors.red.withOpacity(0.85);
+    final Paint paint1 = Paint()..color = Colors.blue.withOpacity(0.85);
     final Paint paint2 = Paint()..color = Colors.white;
 
     canvas.drawCircle(Offset(size / 2, size / 2), size / 2.0, paint1);
@@ -220,7 +239,7 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
     return BitmapDescriptor.fromBytes(data!.buffer.asUint8List());
   }
 
-  void _showDenunciaDetails(BuildContext context, Map<String, dynamic> denuncia) {
+  void _showItemDetails(BuildContext context, Map<String, dynamic> item) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -228,45 +247,31 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        final imagePath = denuncia['image_path'] as String?;
-        final imageUrl = denuncia['agent_image_url'] ?? denuncia['image_url'] as String?;
-        final endereco = [
-          denuncia['rua'],
-          denuncia['numero'],
-          denuncia['bairro']
-        ].where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
-        final descricao = denuncia['descricao'] ?? 'Nenhuma descrição fornecida.';
-        final status = (denuncia['status'] as String?)?.toUpperCase() ?? 'PENDENTE';
-        final isPending = denuncia['is_pending'] ?? false;
+        final isOcorrencia = item['is_ocorrencia'] == true;
+        final modalTitle = isOcorrencia ? 'Detalhes da Ocorrência' : 'Detalhes da Denúncia';
 
+        final imagePath = item['image_path'] as String?;
+        final imageUrl = item['agent_image_url'] ?? item['image_url'] as String?;
+        
+        String endereco;
+        if (isOcorrencia) {
+          endereco = [ item['endereco'], item['numero'], item['localidade'] ]
+              .where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
+        } else {
+          endereco = [ item['rua'], item['numero'], item['bairro'] ]
+              .where((s) => s != null && s.toString().trim().isNotEmpty).join(', ');
+        }
+
+        final descricao = item['descricao'] ?? (isOcorrencia ? 'Ocorrência registrada pelo agente.' : 'Nenhuma descrição fornecida.');
+        final status = (item['status'] as String?)?.toUpperCase() ?? 'PENDENTE';
+        
         Widget imageWidget;
         if (imagePath != null) {
-          imageWidget = Image.file(File(imagePath),
-              height: 200, width: double.infinity, fit: BoxFit.cover);
+          imageWidget = Image.file(File(imagePath), fit: BoxFit.cover);
         } else if (imageUrl != null) {
-          imageWidget = Image.network(imageUrl,
-              height: 200,
-              width: double.infinity,
-              fit: BoxFit.cover,
-              loadingBuilder: (ctx, child, progress) => progress == null
-                  ? child
-                  : const Center(child: CircularProgressIndicator()),
-              errorBuilder: (ctx, err, stack) => Container(
-                  height: 200,
-                  color: Colors.grey[200],
-                  child: const Center(
-                      child: Icon(Icons.broken_image,
-                          color: Colors.grey, size: 48))));
+          imageWidget = Image.network(imageUrl, fit: BoxFit.cover);
         } else {
-          imageWidget = Container(
-              height: 150,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(12)),
-              child: const Center(
-                  child: Icon(Icons.image_not_supported,
-                      color: Colors.grey, size: 48)));
+          imageWidget = Container(height: 150, width: double.infinity, decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(12)), child: const Center(child: Icon(Icons.image_not_supported, color: Colors.grey, size: 48)));
         }
 
         return DraggableScrollableSheet(
@@ -281,51 +286,27 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                      child: Container(
-                          width: 40,
-                          height: 5,
-                          decoration: BoxDecoration(
-                              color: Colors.grey[300],
-                              borderRadius: BorderRadius.circular(12)))),
+                  Center(child: Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(12)))),
                   const SizedBox(height: 16),
-                  Text('Detalhes da Denúncia',
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.bold)),
+                  Text(modalTitle, style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
-                  ClipRRect(
-                      borderRadius: BorderRadius.circular(12), child: imageWidget),
+                  ClipRRect(borderRadius: BorderRadius.circular(12), child: SizedBox(height: 200, width: double.infinity, child: imageWidget)),
                   const SizedBox(height: 20),
                   const Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                        color: isPending
-                            ? Colors.orange.shade100
-                            : Colors.blue.shade100,
-                        borderRadius: BorderRadius.circular(8)),
-                    child: Text(
-                        isPending ? 'PENDENTE DE SINCRONIZAÇÃO' : status,
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isPending
-                                ? Colors.orange.shade800
-                                : Colors.blue.shade800)),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(color: (isOcorrencia || status == 'REALIZADA') ? Colors.green.shade100 : Colors.blue.shade100, borderRadius: BorderRadius.circular(8)),
+                    child: Text(status, style: TextStyle(fontWeight: FontWeight.bold, color: (isOcorrencia || status == 'REALIZADA') ? Colors.green.shade800 : Colors.blue.shade800)),
                   ),
                   const Divider(height: 24),
                   const Text('Localização', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 4),
-                  Text(endereco.isEmpty ? 'Endereço não informado' : endereco,
-                      style: const TextStyle(fontSize: 16)),
+                  Text(endereco.isEmpty ? 'Endereço não informado' : endereco, style: const TextStyle(fontSize: 16)),
                   const Divider(height: 24),
                   const Text('Descrição', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 4),
-                  Text(descricao,
-                      style: const TextStyle(fontSize: 16, color: Colors.black87)),
+                  Text(descricao, style: const TextStyle(fontSize: 16, color: Colors.black87)),
                 ],
               ),
             );
