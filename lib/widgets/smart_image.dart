@@ -1,57 +1,65 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 
+/// Um widget de imagem inteligente que decide se deve carregar uma imagem da rede ou de um arquivo local.
+///
+/// Ele verifica se a `imageSource` começa com 'http' para carregar da rede,
+/// caso contrário, trata como um caminho de arquivo local.
 class SmartImage extends StatelessWidget {
-  final String? imageSource;
+  final String imageSource;
   final BoxFit? fit;
+  final double? width;
+  final double? height;
 
-  // CORRIGIDO: Adicionado o parâmetro 'fit' ao construtor.
-  const SmartImage({super.key, required this.imageSource, this.fit});
+  const SmartImage({
+    super.key,
+    required this.imageSource,
+    this.fit,
+    this.width,
+    this.height,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final source = imageSource;
-    if (source == null || source.isEmpty) {
-      // Retorna um placeholder se a fonte da imagem for nula ou vazia.
-      return const Center(
-        child: Icon(Icons.image_not_supported_outlined, color: Colors.grey, size: 32),
-      );
-    }
+    bool isNetworkImage = imageSource.startsWith('http');
 
-    if (source.startsWith('http')) {
-      // Se o texto começa com 'http', é uma URL da internet.
-      return Image.network(
-        source,
-        // CORRIGIDO: Usa o 'fit' fornecido, ou BoxFit.cover como padrão.
-        fit: fit ?? BoxFit.cover,
-        loadingBuilder: (context, child, progress) {
-          return progress == null ? child : const Center(child: CircularProgressIndicator(strokeWidth: 2));
-        },
-        errorBuilder: (context, error, stackTrace) {
-          return const Center(
-            child: Icon(Icons.broken_image_outlined, color: Colors.grey, size: 32),
-          );
-        },
-      );
-    } else {
-      // Caso contrário, é um caminho de arquivo local.
-      final file = File(source);
-      return FutureBuilder<bool>(
-        future: file.exists(),
-        builder: (context, snapshot) {
-          if (snapshot.data == true) {
-            return Image.file(
-              file,
-              // CORRIGIDO: Usa o 'fit' fornecido, ou BoxFit.cover como padrão.
-              fit: fit ?? BoxFit.cover,
-            );
-          } else {
-            return const Center(
-              child: Icon(Icons.broken_image_outlined, color: Colors.grey, size: 32),
-            );
-          }
-        },
-      );
-    }
+    return isNetworkImage
+        ? Image.network(
+      imageSource,
+      width: width,
+      height: height,
+      fit: fit,
+      // Adiciona um indicador de carregamento para imagens da rede.
+      loadingBuilder: (BuildContext context, Widget child,
+          ImageChunkEvent? loadingProgress) {
+        if (loadingProgress == null) return child;
+        return Center(
+          child: CircularProgressIndicator(
+            value: loadingProgress.expectedTotalBytes != null
+                ? loadingProgress.cumulativeBytesLoaded /
+                loadingProgress.expectedTotalBytes!
+                : null,
+          ),
+        );
+      },
+      // Mostra um ícone de erro se a imagem da rede falhar ao carregar.
+      errorBuilder: (context, error, stackTrace) => Icon(
+        Icons.broken_image,
+        size: width != null ? width! * 0.5 : 48.0,
+        color: Colors.grey,
+      ),
+    )
+        : Image.file(
+      File(imageSource),
+      width: width,
+      height: height,
+      fit: fit,
+      // Mostra um ícone de erro se o arquivo local não for encontrado.
+      errorBuilder: (context, error, stackTrace) => Icon(
+        Icons.broken_image,
+        size: width != null ? width! * 0.5 : 48.0,
+        color: Colors.grey,
+      ),
+    );
   }
 }

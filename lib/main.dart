@@ -7,10 +7,17 @@ import 'package:path_provider/path_provider.dart';
 import 'package:vector_tracker_app/core/app_config.dart';
 import 'package:vector_tracker_app/core/app_logger.dart';
 import 'package:vector_tracker_app/core/service_locator.dart';
-import 'package:vector_tracker_app/screens/pendencias_localidade_screen.dart';
+import 'package:vector_tracker_app/models/denuncia.dart';
+import 'package:vector_tracker_app/models/ocorrencia_siocchagas.dart';
 import 'package:vector_tracker_app/services/agent_service.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/services/hive_sync_service.dart';
+import 'package:vector_tracker_app/services/ocorrencia_siocchagas_service.dart';
+
+// CORREÇÃO FINALÍSSIMA: Usando snake_case para os nomes dos arquivos, como deveria ser.
+import 'package:vector_tracker_app/screens/pendencias_list_screen.dart';
+import 'package:vector_tracker_app/screens/sincronizar_list_screen.dart';
+import 'package:vector_tracker_app/screens/meu_trabalho_list_screen.dart';
 
 import 'package:vector_tracker_app/screens/login_screen.dart';
 import 'package:vector_tracker_app/screens/community_home_screen.dart';
@@ -40,11 +47,16 @@ Future<void> main() async {
 
     final appDocumentDir = await getApplicationDocumentsDirectory();
     await Hive.initFlutter(appDocumentDir.path);
+
+    Hive.registerAdapter(OcorrenciaSiocchagasAdapter());
+
     await Hive.openBox('denuncias_cache');
     await Hive.openBox('pending_sync');
     await Hive.openBox('pending_denuncias');
-    await Hive.openBox('pending_ocorrencias');
+    await Hive.openBox('localidades_cache');
     await Hive.openBox('ocorrencias_cache');
+    await Hive.openBox<OcorrenciaSiocchagas>('ocorrencias_siocchagas');
+    
     AppLogger.info('✓ Hive inicializado');
 
     await ServiceLocator.setup();
@@ -54,25 +66,27 @@ Future<void> main() async {
     AppLogger.error('Erro na inicialização principal', e, stackTrace);
     AppLogger.warning('Iniciando em modo de fallback...');
 
-    await Supabase.initialize(
+     await Supabase.initialize(
       url: 'https://wcxiziyrjiqvhmxvpfga.supabase.co',
       anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjeGl6aXlyamlxdmhteHZwZmdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkyOTg2NDksImV4cCI6MjA3NDg3NDY0OX0.EGNXOT3IhSVLR41q5xE2JGx-gPahQpwkwsitH1wJVLY',
     );
 
     final appDocumentDir = await getApplicationDocumentsDirectory();
     await Hive.initFlutter(appDocumentDir.path);
+
+    Hive.registerAdapter(OcorrenciaSiocchagasAdapter());
+
     await Hive.openBox('denuncias_cache');
     await Hive.openBox('pending_sync');
     await Hive.openBox('pending_denuncias');
-    await Hive.openBox('pending_ocorrencias');
+    await Hive.openBox('localidades_cache');
     await Hive.openBox('ocorrencias_cache');
+    await Hive.openBox<OcorrenciaSiocchagas>('ocorrencias_siocchagas');
     
-    // CORRIGIDO: Garante que o ServiceLocator seja configurado mesmo em caso de erro.
     await ServiceLocator.setup();
     AppLogger.info('✓ Service Locator configurado no modo de fallback');
   }
 
-  // Obtém instâncias dos serviços DEPOIS de garantir que o setup foi executado.
   denunciaService = ServiceLocator.get<DenunciaService>();
   syncService = ServiceLocator.get<HiveSyncService>();
 
@@ -81,6 +95,7 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider.value(value: denunciaService),
         ChangeNotifierProvider(create: (_) => ServiceLocator.get<AgentService>()),
+        ChangeNotifierProvider(create: (_) => ServiceLocator.get<OcorrenciaSiocchagasService>()),
       ],
       child: const MyApp(),
     ),
@@ -136,7 +151,30 @@ class _MyAppState extends State<MyApp> {
         '/mapa_denuncias': (context) => const MapaDenunciasScreen(),
         '/minhas_denuncias': (context) => const MinhasDenunciasScreen(),
         '/registro_ocorrencia': (context) => const RegistroOcorrenciaAgenteScreen(),
-        '/pendencias_localidade': (context) => const PendenciasLocalidadeScreen(),
+
+        // ROTAS CORRIGIDAS PARA APONTAR PARA AS NOVAS TELAS DE LISTA
+        '/pendencias_localidade': (context) => const PendenciasListScreen(),
+
+        // ROTA UNIFICADA: Aponta para o novo formulário mestre.
+        '/novo_registro_proativo': (context) => const RegistroOcorrenciaAgenteScreen(),
+        
+        '/meu_trabalho': (context) => const MeuTrabalhoListScreen(),
+        '/sincronizar_dados': (context) => const SincronizarListScreen(),
+        
+        // ROTA UNIFICADA: Aponta para o novo formulário mestre, passando a denúncia.
+        '/atendimento_denuncia': (context) {
+          final args = ModalRoute.of(context)?.settings.arguments;
+          if (args is Denuncia) {
+            return RegistroOcorrenciaAgenteScreen(denunciaOrigem: args);
+          }
+          // Fallback or error screen if arguments are not correct
+          return Scaffold(
+            appBar: AppBar(title: const Text('Erro')),
+            body: const Center(
+              child: Text('Erro ao carregar a denúncia. Argumentos inválidos.'),
+            ),
+          );
+        }
       },
     );
   }

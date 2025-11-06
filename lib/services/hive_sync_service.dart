@@ -1,32 +1,31 @@
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart';
-import 'package:hive/hive.dart';
-import 'package:vector_tracker_app/main.dart';
-import 'package:vector_tracker_app/services/denuncia_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 import 'package:vector_tracker_app/core/app_logger.dart';
-import 'package:vector_tracker_app/core/exceptions.dart';
-import 'package:vector_tracker_app/core/service_locator.dart';
+import 'package:vector_tracker_app/models/ocorrencia_siocchagas.dart';
+import 'package:vector_tracker_app/services/denuncia_service.dart';
+import 'package:vector_tracker_app/services/ocorrencia_siocchagas_service.dart';
 
-/// Serviço de sincronização usando Hive para armazenamento local
-/// 
-/// ETAPA 2: Refatorado para usar AppLogger e tratamento de erros estruturado.
 class HiveSyncService {
+  final SupabaseClient _supabase = Supabase.instance.client;
   final DenunciaService _denunciaService;
-  final Box _pendingDenunciasBox = Hive.box('pending_denuncias');
-  final Box _pendingOcorrenciasBox = Hive.box('pending_ocorrencias');
+  final OcorrenciaSiocchagasService _ocorrenciaService;
 
   bool _isSyncing = false;
 
-  HiveSyncService({required DenunciaService denunciaService}) : _denunciaService = denunciaService;
+  HiveSyncService({
+    required DenunciaService denunciaService,
+    required OcorrenciaSiocchagasService ocorrenciaService,
+  })  : _denunciaService = denunciaService,
+        _ocorrenciaService = ocorrenciaService;
 
   void start() {
-    AppLogger.sync('Serviço de sincronização iniciado e ouvindo conectividade');
+    AppLogger.sync('Serviço de sincronização iniciado.');
     syncAll();
-    Connectivity().onConnectivityChanged.listen((result) {
-      final isOnline = result.contains(ConnectivityResult.mobile) || result.contains(ConnectivityResult.wifi);
-      if (isOnline) {
-        AppLogger.sync('Conexão detectada! Disparando sincronização');
+    Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
+      if (result == ConnectivityResult.mobile || result == ConnectivityResult.wifi) {
+        AppLogger.sync('Conexão detectada! Disparando sincronização.');
         syncAll();
       }
     });
@@ -34,159 +33,88 @@ class HiveSyncService {
 
   Future<void> syncAll() async {
     if (_isSyncing) {
-      AppLogger.debug('Sync já em progresso, ignorando');
       return;
     }
     _isSyncing = true;
+    AppLogger.sync('Iniciando sincronização de dados pendentes.');
 
-    AppLogger.sync('Iniciando sincronização de todos os dados pendentes');
     try {
-      await _syncPendingOcorrencias();
-      await _syncPendingDenuncias();
-    } catch (e, stackTrace) {
-      AppLogger.error('Erro durante sincronização', e, stackTrace);
+      await _syncOcorrencias();
+    } catch (e, s) {
+      AppLogger.error('Erro durante a sincronização', e, s);
     } finally {
       _isSyncing = false;
-      AppLogger.sync('Sincronização finalizada');
+      AppLogger.sync('Sincronização finalizada.');
     }
   }
 
-  Future<void> _syncPendingOcorrencias() async {
-    if (_pendingOcorrenciasBox.isEmpty) {
-      AppLogger.sync('Nenhuma ocorrência pendente para sincronizar');
-      return;
-    }
-    
-    AppLogger.sync('Encontradas ${_pendingOcorrenciasBox.length} ocorrências pendentes');
+  Future<String?> _uploadFoto(String? fotoPath) async {
+    if (fotoPath == null || fotoPath.isEmpty) return null;
+    final file = File(fotoPath);
+    if (!await file.exists()) return null;
 
-    final List pendingKeys = _pendingOcorrenciasBox.keys.toList();
+    final fileName = '${Uuid().v4()}_${fotoPath.split('/').last}';
+    final userId = _supabase.auth.currentUser?.id ?? 'anonymous';
+    final uploadPath = '$userId/ocorrencias/$fileName';
 
-    for (var key in pendingKeys) {
-      try {
-        final data = Map<String, dynamic>.from(_pendingOcorrenciasBox.get(key) as Map);
-        AppLogger.sync('Sincronizando ocorrência $key');
-
-        final List<String> existingImageUrls = List<String>.from(data['image_urls'] ?? []);
-        final List<String> newImageUrls = [];
-        
-        if (data['image_paths'] != null) {
-          final imagePaths = List<String>.from(data['image_paths']);
-          for (String path in imagePaths) {
-            final imageFile = File(path);
-            if (await imageFile.exists()) {
-              AppLogger.sync('Fazendo upload de imagem: $path');
-              final fileName = '${DateTime.now().millisecondsSinceEpoch}_${path.split('/').last}';
-              final userId = supabase.auth.currentUser?.id ?? 'anonymous';
-              final uploadPath = '$userId/ocorrencias/$fileName';
-              await supabase.storage.from('imagens_denuncias').upload(uploadPath, imageFile);
-              newImageUrls.add(supabase.storage.from('imagens_denuncias').getPublicUrl(uploadPath));
-            }
-          }
-        }
-
-        final Map<String, dynamic> cleanData = Map.from(data);
-        cleanData.remove('local_id');
-        cleanData.remove('is_ocorrencia');
-        cleanData.remove('is_pending');
-        cleanData.remove('image_paths');
-        cleanData.remove('local_image_paths');
-        cleanData.remove('created_at');
-        cleanData.remove('status');
-
-        cleanData['image_urls'] = [...existingImageUrls, ...newImageUrls];
-        cleanData['uid'] = supabase.auth.currentUser?.id;
-
-        final recordId = cleanData.remove('id');
-        dynamic result;
-        if (recordId != null) {
-          AppLogger.sync('Atualizando ocorrência existente $recordId');
-          result = await supabase.from('ocorrencias').update(cleanData).eq('id', recordId).select().single();
-        } else {
-          AppLogger.sync('Criando nova ocorrência');
-          result = await supabase.from('ocorrencias').insert(cleanData).select().single();
-        }
-
-        await _pendingOcorrenciasBox.delete(key);
-
-        final localDataToUpdate = Map<String, dynamic>.from(data);
-        localDataToUpdate['is_pending'] = false;
-        localDataToUpdate['id'] = result['id'];
-
-        _denunciaService.updateItemInList(localDataToUpdate);
-        AppLogger.sync('✓ Ocorrência $key sincronizada com sucesso');
-
-      } catch (e, stackTrace) {
-        AppLogger.error('Erro ao sincronizar ocorrência $key', e, stackTrace);
-        // Continua para próxima ocorrência
-      }
+    try {
+      await _supabase.storage.from('imagens_denuncias').upload(uploadPath, file);
+      return _supabase.storage.from('imagens_denuncias').getPublicUrl(uploadPath);
+    } catch (e, s) {
+      AppLogger.error('Erro no upload da foto: $fotoPath', e, s);
+      return null;
     }
   }
 
+  Future<void> _syncOcorrencias() async {
+    final pendentes = _ocorrenciaService.pendentesSincronizacao;
+    final currentUser = _supabase.auth.currentUser;
 
-  /// ETAPA 2: Refatorado para usar AppLogger
-  Future<void> _syncPendingDenuncias() async {
-    if (_pendingDenunciasBox.isEmpty) {
-      AppLogger.sync('Nenhuma denúncia pendente para sincronizar');
+    if (pendentes.isEmpty) {
       return;
     }
-    
-    AppLogger.sync('Encontradas ${_pendingDenunciasBox.length} denúncias pendentes');
 
-    final List pendingKeys = _pendingDenunciasBox.keys.toList();
+    if (currentUser == null) {
+      AppLogger.sync('Sincronização de ocorrências adiada: Nenhum usuário logado.');
+      return;
+    }
 
-    for (var key in pendingKeys) {
+    AppLogger.sync('Sincronizando ${pendentes.length} ocorrências.');
+
+    for (final ocorrencia in pendentes) {
       try {
-        final data = Map<String, dynamic>.from(_pendingDenunciasBox.get(key) as Map);
-        AppLogger.sync('Sincronizando denúncia $key');
+        final url1 = await _uploadFoto(ocorrencia.foto_url_1);
+        final url2 = await _uploadFoto(ocorrencia.foto_url_2);
+        final url3 = await _uploadFoto(ocorrencia.foto_url_3);
+        final url4 = await _uploadFoto(ocorrencia.foto_url_4);
 
-        String? imageUrl = data['image_url'];
-        if (data['image_path'] != null) {
-          final imageFile = File(data['image_path']);
-          if (await imageFile.exists()) {
-            AppLogger.sync('Fazendo upload de imagem da denúncia: $imageFile');
-            final fileName = '${DateTime.now().millisecondsSinceEpoch}.jpg';
-            final uploadPath = 'public/denuncias/$fileName';
-            await supabase.storage.from('imagens_denuncias').upload(uploadPath, imageFile);
-            imageUrl = supabase.storage.from('imagens_denuncias').getPublicUrl(uploadPath);
-          }
+        final dataToSync = ocorrencia.toMap();
+
+        dataToSync['agente_id'] ??= currentUser.id;
+
+        dataToSync.addAll({
+          'foto_url_1': url1,
+          'foto_url_2': url2,
+          'foto_url_3': url3,
+          'foto_url_4': url4,
+        });
+
+        await _supabase.from('ocorrencias').insert(dataToSync);
+
+        if (ocorrencia.denuncia_id != null) {
+          await _supabase
+              .from('denuncias')
+              .update({'status': 'Atendida'})
+              .eq('id', ocorrencia.denuncia_id!);
         }
 
-        final Map<String, dynamic> cleanData = {
-          'descricao': data['descricao'],
-          'latitude': data['latitude'],
-          'longitude': data['longitude'],
-          'rua': data['rua'],
-          'bairro': data['bairro'],
-          'cidade': data['cidade'],
-          'estado': data['estado'],
-          'numero': data['numero'],
-          'status': data['status'],
-          'image_url': imageUrl,
-        };
+        ocorrencia.status_envio = 'Enviada (Sincronizada)';
+        await _ocorrenciaService.saveOcorrencia(ocorrencia);
 
-        final recordId = data['id'];
-        dynamic result;
-        if (recordId != null) {
-          AppLogger.sync('Atualizando denúncia existente $recordId');
-          result = await supabase.from('denuncias').update(cleanData).eq('id', recordId).select().single();
-        } else {
-          AppLogger.sync('Criando nova denúncia');
-          result = await supabase.from('denuncias').insert(cleanData).select().single();
-        }
-
-        await _pendingDenunciasBox.delete(key);
-
-        final localDataToUpdate = Map<String, dynamic>.from(data);
-        localDataToUpdate['is_pending'] = false;
-        localDataToUpdate['id'] = result['id'];
-        
-        _denunciaService.updateItemInList(localDataToUpdate);
-        AppLogger.sync('✓ Denúncia $key sincronizada com sucesso');
-
-      } catch (e, stackTrace) {
-        AppLogger.error('Erro ao sincronizar denúncia $key', e, stackTrace);
-        // Continua para próxima denúncia
+      } catch (e, s) {
+        AppLogger.error('Erro ao sincronizar ocorrência ${ocorrencia.localId}', e, s);
       }
     }
+    await _denunciaService.fetchItems();
   }
 }

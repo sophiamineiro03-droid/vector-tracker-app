@@ -70,7 +70,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Image.asset('assets/logo.png', height: 100),
+                        Image.asset('assets/logo.png', height: 100), // <-- CORREÇÃO APLICADA
                         const SizedBox(height: 24.0),
                         _buildTabSelector(context, accentColor),
                         const SizedBox(height: 24.0),

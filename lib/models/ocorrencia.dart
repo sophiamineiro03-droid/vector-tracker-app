@@ -13,6 +13,8 @@ class Ocorrencia {
   final String? numero_pit;
 
   // Dados do Domicílio
+  final String? codigo_localidade;
+  final String? categoria_localidade;
   final String? localidade;
   final String? endereco;
   final String? numero;
@@ -45,7 +47,7 @@ class Ocorrencia {
   // Borrifação
   final String? inseticida;
   final int? numero_cargas;
-  final String? codigo_etiqueta;
+  final String? codigo_etiqueta; // RESTAURADO
 
   // Localização
   final double? latitude;
@@ -68,6 +70,8 @@ class Ocorrencia {
     this.tipo_atividade,
     this.data_atividade,
     this.numero_pit,
+    this.codigo_localidade,
+    this.categoria_localidade,
     this.localidade,
     this.endereco,
     this.numero,
@@ -86,7 +90,7 @@ class Ocorrencia {
     this.barbeiros_peridomicilio,
     this.inseticida,
     this.numero_cargas,
-    this.codigo_etiqueta,
+    this.codigo_etiqueta, // RESTAURADO
     this.latitude,
     this.longitude,
     this.sincronizado = false,
@@ -105,6 +109,8 @@ class Ocorrencia {
       tipo_atividade: map['tipo_atividade'] != null ? TipoAtividade.values.firstWhere((e) => e.name == map['tipo_atividade'], orElse: () => TipoAtividade.pesquisa) : null,
       data_atividade: DateTime.tryParse(map['data_atividade'] ?? ''),
       numero_pit: map['numero_pit'] as String?,
+      codigo_localidade: map['codigo_localidade'] as String?,
+      categoria_localidade: map['categoria_localidade'] as String?,
       localidade: map['localidade'] as String?,
       endereco: map['endereco'] as String?,
       numero: map['numero'] as String?,
@@ -123,7 +129,7 @@ class Ocorrencia {
       barbeiros_peridomicilio: map['barbeiros_peridomicilio'] as int?,
       inseticida: map['inseticida'] as String?,
       numero_cargas: map['numero_cargas'] as int?,
-      codigo_etiqueta: map['codigo_etiqueta'] as String?,
+      codigo_etiqueta: map['codigo_etiqueta'] as String?, // RESTAURADO
       latitude: (map['latitude'] as num?)?.toDouble(),
       longitude: (map['longitude'] as num?)?.toDouble(),
       sincronizado: map['sincronizado'] as bool? ?? false,
@@ -143,6 +149,8 @@ class Ocorrencia {
       'tipo_atividade': tipo_atividade?.name,
       'data_atividade': data_atividade?.toIso8601String(),
       'numero_pit': numero_pit,
+      'codigo_localidade': codigo_localidade,
+      'categoria_localidade': categoria_localidade,
       'localidade': localidade,
       'endereco': endereco,
       'numero': numero,
@@ -161,7 +169,7 @@ class Ocorrencia {
       'barbeiros_peridomicilio': barbeiros_peridomicilio,
       'inseticida': inseticida,
       'numero_cargas': numero_cargas,
-      'codigo_etiqueta': codigo_etiqueta,
+      'codigo_etiqueta': codigo_etiqueta, // RESTAURADO
       'latitude': latitude,
       'longitude': longitude,
       'sincronizado': sincronizado,

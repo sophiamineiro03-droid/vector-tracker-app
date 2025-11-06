@@ -1,68 +1,102 @@
+import 'package:flutter/foundation.dart';
+
+@immutable
 class Denuncia {
   final String id;
-  final String? comunidadeId;
-  final String? municipioId;
-  final String? setorId;
   final String? descricao;
-  final String status;
   final double? latitude;
   final double? longitude;
-  final DateTime? createdAt;
-  final bool sincronizado;
-
   final String? rua;
-  final String? numero;
   final String? bairro;
+  final String? localidade;
+  final String? cidade;
+  final String? estado;
+  final String? numero;
+  final String? foto_url;
+  final DateTime? createdAt;
+  final String? status;
 
-  Denuncia({
+  const Denuncia({
     required this.id,
-    this.comunidadeId,
-    this.municipioId,
-    this.setorId,
     this.descricao,
-    this.status = 'pendente',
     this.latitude,
     this.longitude,
-    this.createdAt,
-    this.sincronizado = false,
     this.rua,
-    this.numero,
     this.bairro,
+    this.localidade,
+    this.cidade,
+    this.estado,
+    this.numero,
+    this.foto_url,
+    this.createdAt,
+    this.status,
   });
 
-  factory Denuncia.fromMap(Map<String, dynamic> map) {
+  Denuncia copyWith({
+    String? id,
+    String? descricao,
+    double? latitude,
+    double? longitude,
+    String? rua,
+    String? bairro,
+    String? localidade,
+    String? cidade,
+    String? estado,
+    String? numero,
+    String? foto_url,
+    DateTime? createdAt,
+    String? status,
+  }) {
     return Denuncia(
-      id: map['id'] as String,
-      comunidadeId: map['comunidade_id'] as String?,
-      municipioId: map['municipio_id'] as String?,
-      setorId: map['setor_id'] as String?,
-      descricao: map['descricao'] as String?,
-      status: map['status'] as String? ?? 'pendente',
-      latitude: (map['latitude'] as num?)?.toDouble(),
-      longitude: (map['longitude'] as num?)?.toDouble(),
-      createdAt: DateTime.tryParse(map['created_at'] ?? ''),
-      sincronizado: map['sincronizado'] as bool? ?? false,
-      rua: map['rua'] as String?,
-      numero: map['numero'] as String?,
-      bairro: map['bairro'] as String?,
+      id: id ?? this.id,
+      descricao: descricao ?? this.descricao,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      rua: rua ?? this.rua,
+      bairro: bairro ?? this.bairro,
+      localidade: localidade ?? this.localidade,
+      cidade: cidade ?? this.cidade,
+      estado: estado ?? this.estado,
+      numero: numero ?? this.numero,
+      foto_url: foto_url ?? this.foto_url,
+      createdAt: createdAt ?? this.createdAt,
+      status: status ?? this.status,
     );
   }
 
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'comunidade_id': comunidadeId,
-      'municipio_id': municipioId,
-      'setor_id': setorId,
       'descricao': descricao,
-      'status': status,
-      'latitude': latitude,
-      'longitude': longitude,
-      'created_at': createdAt?.toIso8601String(),
-      'sincronizado': sincronizado,
+      'gps_latitude': latitude,
+      'gps_longitude': longitude,
       'rua': rua,
-      'numero': numero,
       'bairro': bairro,
+      'localidade': localidade,
+      'cidade': cidade,
+      'estado': estado,
+      'numero_casa': numero,
+      'foto_url': foto_url,
+      'criada_em': createdAt?.toIso8601String(),
+      'status': status,
     };
+  }
+
+  factory Denuncia.fromMap(Map<String, dynamic> map) {
+    return Denuncia(
+      id: map['id'] ?? '',
+      descricao: map['descricao'],
+      latitude: map['gps_latitude']?.toDouble(),
+      longitude: map['gps_longitude']?.toDouble(),
+      rua: map['rua'],
+      bairro: map['bairro'],
+      localidade: map['localidade'],
+      cidade: map['cidade'],
+      estado: map['estado'],
+      numero: map['numero_casa'],
+      foto_url: map['foto_url'],
+      createdAt: map['criada_em'] != null ? DateTime.parse(map['criada_em']) : null,
+      status: map['status'],
+    );
   }
 }

@@ -1,157 +1,117 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:vector_tracker_app/models/ocorrencia.dart';
-import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
-import 'package:vector_tracker_app/services/agent_service.dart';
+import 'package:vector_tracker_app/services/ocorrencia_siocchagas_service.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
+import 'package:vector_tracker_app/services/denuncia_service.dart';
 
-class PainelAceScreen extends StatefulWidget {
+// ARQUIVO RESTAURADO CONFORME A INSTRUÇÃO FINALÍSSIMA
+// A interface original do painel foi restaurada, e apenas a navegação foi implementada.
+class PainelAceScreen extends StatelessWidget {
   const PainelAceScreen({super.key});
 
   @override
-  State<PainelAceScreen> createState() => _PainelAceScreenState();
-}
-
-class _PainelAceScreenState extends State<PainelAceScreen> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AgentService>().getMeuTrabalho();
-    });
-  }
-
-  Future<void> _navigateToForm(BuildContext context, [Ocorrencia? ocorrencia]) async {
-    final agentService = context.read<AgentService>();
-    
-    final bool? result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => RegistroOcorrenciaAgenteScreen(
-          ocorrencia: ocorrencia,
-        ),
-      ),
-    );
-
-    if (result == true && mounted) {
-      agentService.getMeuTrabalho();
-      agentService.loadAgentData();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const GradientAppBar(
-        title: 'Meu Trabalho', // Título alterado
-        centerTitle: true, // Título centralizado
-      ),
-      body: Consumer<AgentService>(
-        builder: (context, agentService, child) {
-          if (agentService.isOcorrenciasLoading && agentService.minhasOcorrencias.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          
-          final ocorrencias = agentService.minhasOcorrencias;
-          
-          if (ocorrencias.isEmpty) {
-            return RefreshIndicator(
-              onRefresh: () => agentService.getMeuTrabalho(),
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                children: const [
-                  Padding(
-                    padding: EdgeInsets.all(48.0),
-                    child: Center(child: Text('Nenhuma visita ou ocorrência encontrada.\nPuxe para baixo para atualizar.')),
-                  ),
-                ],
-              ),
-            );
-          }
+    final ocorrenciaService = context.watch<OcorrenciaSiocchagasService>();
+    final denunciaService = context.watch<DenunciaService>();
 
-          return RefreshIndicator(
-            onRefresh: () => agentService.getMeuTrabalho(),
-            child: ListView.separated(
-              padding: const EdgeInsets.all(12.0),
-              itemCount: ocorrencias.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final ocorrencia = ocorrencias[index];
-                return CardOcorrencia(
-                  ocorrencia: ocorrencia,
-                  onTap: () => _navigateToForm(context, ocorrencia),
+    // Busca os dados em segundo plano para manter os contadores atualizados.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      denunciaService.fetchItems();
+    });
+
+    final pendenciasCount = denunciaService.items.where((d) => d['status'] != 'Atendida').length;
+    final sincronizarCount = ocorrenciaService.pendentesSincronizacao.length;
+    final meuTrabalhoCount = ocorrenciaService.meuTrabalho.length;
+
+    return Scaffold(
+      appBar: const GradientAppBar(title: 'Painel do Agente'),
+      // O corpo contém apenas a grade de 6 botões, como no seu design original.
+      body: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: GridView.count(
+          crossAxisCount: 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          children: [
+            _buildDashboardCard(
+              icon: Icons.notifications_active_outlined,
+              title: 'Pendências da Localidade',
+              subtitle: '$pendenciasCount denúncias aguardando',
+              onTap: () => Navigator.pushNamed(context, '/pendencias_localidade'),
+            ),
+            _buildDashboardCard(
+              icon: Icons.add_location_alt_outlined, 
+              title: 'Novo Registro Proativo',
+              subtitle: 'Iniciar uma nova visita de campo',
+              onTap: () => Navigator.pushNamed(context, '/novo_registro_proativo'),
+            ),
+            _buildDashboardCard(
+              icon: Icons.fact_check_outlined,
+              title: 'Meu Trabalho',
+              subtitle: '$meuTrabalhoCount registros concluídos',
+              onTap: () => Navigator.pushNamed(context, '/meu_trabalho'),
+            ),
+            _buildDashboardCard(
+              icon: Icons.map_outlined,
+              title: 'Mapa da Área',
+              subtitle: 'Visualizar pontos no mapa',
+              onTap: () => Navigator.pushNamed(context, '/mapa_denuncias'),
+            ),
+            _buildDashboardCard(
+              icon: Icons.sync,
+              title: 'Sincronizar Dados',
+              subtitle: '$sincronizarCount pendentes de envio',
+              onTap: () => Navigator.pushNamed(context, '/sincronizar_dados'),
+            ),
+            _buildDashboardCard(
+              icon: Icons.person_outline,
+              title: 'Perfil do Agente',
+              subtitle: 'Sua conta e configurações',
+              onTap: () {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Tela de Perfil a ser implementada.')),
                 );
               },
             ),
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _navigateToForm(context),
-        tooltip: 'Registrar Nova Ocorrência',
-        child: const Icon(Icons.add),
+          ],
+        ),
       ),
     );
   }
-}
 
-class CardOcorrencia extends StatelessWidget {
-  final Ocorrencia ocorrencia;
-  final VoidCallback onTap;
-
-  const CardOcorrencia({super.key, required this.ocorrencia, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final isPendingSync = ocorrencia.status == 'pendente';
-
-    final title = [ocorrencia.localidade, ocorrencia.endereco].where((s) => s != null && s.trim().isNotEmpty).join(', ');
-    final date = _formatarData(ocorrencia.data_atividade);
-
-    return Card(
-      elevation: 2.0,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
-      child: InkWell(
-        onTap: onTap,
+  // Widget para construir os cards para se assemelhar ao design original da imagem.
+  Widget _buildDashboardCard({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(15),
+      child: Card(
+        elevation: 3,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildStatusIcon(isPendingSync),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title.isEmpty ? "Ocorrência de Campo" : title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 4),
-                    Text(date, style: TextStyle(fontSize: 14, color: Colors.grey[600])),
-                  ],
-                ),
+              Icon(icon, size: 36, color: const Color(0xFF005b96)),
+              const Spacer(),
+              Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
-              if (isPendingSync) ...[
-                const SizedBox(width: 8),
-                const Tooltip(message: 'Pendente de sincronização', child: Icon(Icons.cloud_upload_outlined, size: 20, color: Colors.orange)),
-              ],
-              const SizedBox(width: 8),
-              const Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
             ],
           ),
         ),
       ),
     );
-  }
-
-  String _formatarData(DateTime? data) {
-    if (data == null) return 'Data não disponível';
-    return DateFormat('dd/MM/yyyy').format(data);
-  }
-
-  Widget _buildStatusIcon(bool isPendingSync) {
-    return isPendingSync
-      ? Icon(Icons.cloud_upload_rounded, color: Colors.orange[600], size: 32)
-      : Icon(Icons.description_rounded, color: Colors.indigo[400], size: 32);
   }
 }

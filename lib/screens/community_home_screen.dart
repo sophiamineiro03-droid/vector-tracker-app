@@ -16,7 +16,7 @@ class CommunityHomeScreen extends StatelessWidget {
           children: [
             ElevatedButton.icon(
               icon: const Icon(Icons.add_location_alt),
-              label: const Text('Registrar Ocorrência'),
+              label: const Text('Registrar Denúncia'),
               onPressed: () {
                 Navigator.pushNamed(context, '/denuncia');
               },

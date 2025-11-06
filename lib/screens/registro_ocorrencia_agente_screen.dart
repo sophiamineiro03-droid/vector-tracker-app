@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -14,21 +15,33 @@ import 'package:vector_tracker_app/util/location_util.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 import 'package:vector_tracker_app/widgets/smart_image.dart';
 
-// Função auxiliar para formatar nomes de enums para a UI
+// Helper to format Enum names for display
 String formatEnumName(String name) {
   switch (name) {
-    case 'pesquisa': return 'Pesquisa';
-    case 'borrifacao': return 'Borrifação';
-    case 'atendimentoPIT': return 'Atendimento ao PIT';
-    case 'reconhecida': return 'Reconhecida (já foi pesquisada)';
-    case 'nova': return 'Nova (primeira pesquisa)';
-    case 'demolida': return 'Demolida';
-    case 'semPendencias': return 'Sem pendências';
-    case 'fechado': return 'Domicílio fechado';
-    case 'recusa': return 'Recusa';
-    case 'triatomineo': return 'Triatomíneo';
-    case 'nenhum': return 'Nenhum';
-    default: return name;
+    case 'pesquisa':
+      return 'Pesquisa';
+    case 'borrifacao':
+      return 'Borrifação';
+    case 'atendimentoPIT':
+      return 'Atendimento ao PIT';
+    case 'reconhecida':
+      return 'Reconhecida (já foi pesquisada)';
+    case 'nova':
+      return 'Nova (primeira pesquisa)';
+    case 'demolida':
+      return 'Demolida';
+    case 'semPendencias':
+      return 'Sem pendências';
+    case 'fechado':
+      return 'Domicílio fechado';
+    case 'recusa':
+      return 'Recusa';
+    case 'triatomineo':
+      return 'Triatomíneo';
+    case 'nenhum':
+      return 'Nenhum';
+    default:
+      return name;
   }
 }
 
@@ -49,19 +62,18 @@ class RegistroOcorrenciaAgenteScreen extends StatefulWidget {
 
 class _RegistroOcorrenciaAgenteScreenState
     extends State<RegistroOcorrenciaAgenteScreen> {
+  // FORM STATE AND CONTROLLERS
   final _formKey = GlobalKey<FormState>();
   late bool _isNew;
   late bool _isViewMode;
   bool _isSaving = false;
   bool _isGettingLocation = false;
-
+  String? _openPanelKey = 'atividade';
   final List<String> _localImagePaths = [];
   final List<XFile> _newlyAddedImages = [];
-
   double? _currentLat;
   double? _currentLng;
 
-  // Controllers
   final _dataAtividadeController = TextEditingController();
   final _numeroPITController = TextEditingController();
   final _municipioController = TextEditingController();
@@ -72,23 +84,25 @@ class _RegistroOcorrenciaAgenteScreenState
   final _numeroController = TextEditingController();
   final _complementoController = TextEditingController();
   final _nomeMoradorController = TextEditingController();
-  final _numBarbeirosIntraController = TextEditingController();
-  final _numBarbeirosPeriController = TextEditingController();
+  final _numBarbeirosIntraController = TextEditingController(text: '0');
+  final _numBarbeirosPeriController = TextEditingController(text: '0');
   final _inseticidaController = TextEditingController();
-  final _numCargasController = TextEditingController();
+  final _numCargasController = TextEditingController(text: '0');
   final _codigoEtiquetaController = TextEditingController();
   final _agenteController = TextEditingController();
 
   TipoAtividade? _tipoAtividade = TipoAtividade.pesquisa;
   bool _realizarBorrifacaoNoPIT = false;
   SituacaoImovel? _situacaoImovel;
-  Pendencia? _pendenciaPesquisa, _pendenciaBorrifacao;
+  Pendencia? _pendenciaPesquisa = Pendencia.semPendencias;
+  Pendencia? _pendenciaBorrifacao = Pendencia.semPendencias;
   String? _tipoParede, _tipoTeto;
   bool? _melhoriaHabitacional;
   int? _numeroAnexo;
-  CapturaStatus? _capturaIntraStatus, _capturaPeriStatus;
-  final Map<String, bool> _vestigiosIntra = {'Ovos': false, 'Ninfas': false, 'Exúvias': false, 'Fezes': false, 'Nenhum': false};
-  final Map<String, bool> _vestigiosPeri = {'Ovos': false, 'Ninfas': false, 'Exúvias': false, 'Fezes': false, 'Nenhum': false};
+  CapturaStatus? _capturaIntraStatus = CapturaStatus.nenhum;
+  CapturaStatus? _capturaPeriStatus = CapturaStatus.nenhum;
+  final Map<String, bool> _vestigiosIntra = {'Ovos': false, 'Nenhum': true};
+  final Map<String, bool> _vestigiosPeri = {'Ovos': false, 'Nenhum': true};
 
   @override
   void initState() {
@@ -98,37 +112,44 @@ class _RegistroOcorrenciaAgenteScreenState
 
     final agent = context.read<AgentService>().currentAgent;
     _agenteController.text = agent?.nome ?? 'Agente Não Identificado';
+    _municipioController.text = agent?.municipioNome ?? 'Dom Inocêncio';
 
     if (widget.ocorrencia != null) {
       _populateFromOcorrencia(widget.ocorrencia!);
     } else if (widget.denunciaOrigem != null) {
       _populateFromDenuncia(widget.denunciaOrigem!);
     } else {
-      _dataAtividadeController.text = DateFormat('dd/MM/yyyy').format(DateTime.now());
-      _municipioController.text = agent?.municipioNome ?? '';
+      _dataAtividadeController.text =
+          DateFormat('dd/MM/yyyy').format(DateTime.now());
       _localidadeController.text = agent?.localidade ?? '';
     }
   }
-  
+
   void _populateFromOcorrencia(Ocorrencia oco) {
-    if (oco.localImagePaths != null) _localImagePaths.addAll(oco.localImagePaths!);
-    
-    _dataAtividadeController.text = oco.data_atividade != null ? DateFormat('dd/MM/yyyy').format(oco.data_atividade!) : '';
+    if (oco.localImagePaths != null) {
+      _localImagePaths.addAll(oco.localImagePaths!);
+    }
+    _dataAtividadeController.text = oco.data_atividade != null
+        ? DateFormat('dd/MM/yyyy').format(oco.data_atividade!)
+        : '';
     _currentLat = oco.latitude;
     _currentLng = oco.longitude;
     _numeroPITController.text = oco.numero_pit ?? '';
     _municipioController.text = oco.municipio_id ?? '';
+    _codigoLocalidadeController.text = oco.codigo_localidade ?? '';
+    _categoriaLocalidadeController.text = oco.categoria_localidade ?? '';
     _localidadeController.text = oco.localidade ?? '';
     _enderecoController.text = oco.endereco ?? '';
     _numeroController.text = oco.numero ?? '';
     _complementoController.text = oco.complemento ?? '';
     _nomeMoradorController.text = oco.nome_morador ?? '';
-    _numBarbeirosIntraController.text = oco.barbeiros_intradomicilio?.toString() ?? '0';
-    _numBarbeirosPeriController.text = oco.barbeiros_peridomicilio?.toString() ?? '0';
+    _numBarbeirosIntraController.text =
+        oco.barbeiros_intradomicilio?.toString() ?? '0';
+    _numBarbeirosPeriController.text =
+        oco.barbeiros_peridomicilio?.toString() ?? '0';
     _inseticidaController.text = oco.inseticida ?? '';
     _numCargasController.text = oco.numero_cargas?.toString() ?? '0';
     _codigoEtiquetaController.text = oco.codigo_etiqueta ?? '';
-
     _tipoAtividade = oco.tipo_atividade;
     _situacaoImovel = oco.situacao_imovel;
     _pendenciaPesquisa = oco.pendencia_pesquisa;
@@ -141,10 +162,10 @@ class _RegistroOcorrenciaAgenteScreenState
 
   void _populateFromDenuncia(Denuncia den) {
     final agent = context.read<AgentService>().currentAgent;
-    _tipoAtividade = TipoAtividade.atendimentoPIT;
-    _dataAtividadeController.text = DateFormat('dd/MM/yyyy').format(DateTime.now());
-    _numeroPITController.text = den.id.toString(); // Using denuncia ID as PIT number context
-    _municipioController.text = den.municipioId ?? agent?.municipioId ?? '';
+    _tipoAtividade = null;
+    _dataAtividadeController.text =
+        DateFormat('dd/MM/yyyy').format(DateTime.now());
+    _municipioController.text = den.cidade ?? agent?.municipioId ?? '';
     _localidadeController.text = den.bairro ?? agent?.localidade ?? '';
     _enderecoController.text = den.rua ?? '';
     _numeroController.text = den.numero ?? '';
@@ -175,28 +196,39 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   Future<void> _saveForm() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Por favor, corrija os erros em vermelho.'),
+            backgroundColor: Colors.red),
+      );
+      return;
+    }
     setState(() => _isSaving = true);
 
     final agentService = context.read<AgentService>();
-    final agent = agentService.currentAgent; // Será null no modo de teste, e isso está OK.
-
-    // O bloqueio que verificava se o agente era nulo foi removido.
+    final agent = agentService.currentAgent;
 
     final id = widget.ocorrencia?.id ?? const Uuid().v4();
-    final dataAtividade = DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ?? DateTime.now();
-    final allImagePaths = [..._localImagePaths, ..._newlyAddedImages.map((f) => f.path)];
+    final dataAtividade =
+        DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ??
+            DateTime.now();
+    final allImagePaths = [
+      ..._localImagePaths,
+      ..._newlyAddedImages.map((f) => f.path)
+    ];
 
     final ocorrencia = Ocorrencia(
       id: id,
-      // Campos do agente agora são nulos se não houver agente (modo teste)
       agente_id: agent?.id,
       denuncia_id: widget.denunciaOrigem?.id,
-      municipio_id: agent?.municipioId,
+      municipio_id: _municipioController.text,
       setor_id: agent?.setorId,
       tipo_atividade: _tipoAtividade,
       data_atividade: dataAtividade,
       numero_pit: _numeroPITController.text,
+      codigo_localidade: _codigoLocalidadeController.text,
+      categoria_localidade: _categoriaLocalidadeController.text,
       localidade: _localidadeController.text,
       endereco: _enderecoController.text,
       numero: _numeroController.text,
@@ -209,10 +241,20 @@ class _RegistroOcorrenciaAgenteScreenState
       tipo_parede: _tipoParede,
       tipo_teto: _tipoTeto,
       melhoria_habitacional: _melhoriaHabitacional,
-      vestigios_intradomicilio: _vestigiosIntra['Nenhum']! ? 'Nenhum' : _vestigiosIntra.keys.where((k) => k != 'Nenhum' && _vestigiosIntra[k]!).join(', '),
-      barbeiros_intradomicilio: int.tryParse(_numBarbeirosIntraController.text) ?? 0,
-      vestigios_peridomicilio: _vestigiosPeri['Nenhum']! ? 'Nenhum' : _vestigiosPeri.keys.where((k) => k != 'Nenhum' && _vestigiosPeri[k]!).join(', '),
-      barbeiros_peridomicilio: int.tryParse(_numBarbeirosPeriController.text) ?? 0,
+      vestigios_intradomicilio: _vestigiosIntra['Nenhum']!
+          ? 'Nenhum'
+          : _vestigiosIntra.keys
+          .where((k) => k != 'Nenhum' && _vestigiosIntra[k]!)
+          .join(', '),
+      barbeiros_intradomicilio:
+      int.tryParse(_numBarbeirosIntraController.text) ?? 0,
+      vestigios_peridomicilio: _vestigiosPeri['Nenhum']!
+          ? 'Nenhum'
+          : _vestigiosPeri.keys
+          .where((k) => k != 'Nenhum' && _vestigiosPeri[k]!)
+          .join(', '),
+      barbeiros_peridomicilio:
+      int.tryParse(_numBarbeirosPeriController.text) ?? 0,
       inseticida: _inseticidaController.text,
       numero_cargas: int.tryParse(_numCargasController.text) ?? 0,
       codigo_etiqueta: _codigoEtiquetaController.text,
@@ -229,318 +271,747 @@ class _RegistroOcorrenciaAgenteScreenState
         await agentService.editarOcorrencia(ocorrencia);
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_isNew ? 'Ocorrência salva localmente!' : 'Alterações salvas!'), backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(_isNew
+                ? 'Ocorrência salva localmente!'
+                : 'Alterações salvas!'),
+            backgroundColor: Colors.green));
         Navigator.of(context).pop(true);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: $e'), backgroundColor: Colors.red));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Erro ao salvar: ${e.toString()}'),
+            backgroundColor: Colors.red));
+      }
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
-  
-  // --- UI Build ---
-  
+
   @override
   Widget build(BuildContext context) {
-    bool isBasedOnDenuncia = widget.denunciaOrigem != null;
-    bool showSprayingSection = _tipoAtividade == TipoAtividade.borrifacao || (_tipoAtividade == TipoAtividade.atendimentoPIT && _realizarBorrifacaoNoPIT);
+    final theme = Theme.of(context);
+    final titleStyle =
+    theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold);
 
     return Scaffold(
-      appBar: GradientAppBar(title: _isNew ? 'Nova Ocorrência' : (_isViewMode ? 'Detalhes da Visita' : 'Editar Visita')),
+      appBar: GradientAppBar(
+        title: widget.denunciaOrigem != null
+            ? 'Atender Denúncia'
+            : (_isNew
+            ? 'Novo Registro Proativo'
+            : (_isViewMode ? 'Detalhes da Visita' : 'Editar Visita')),
+      ),
       body: Form(
         key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
+        // **** CORREÇÃO ADICIONADA AQUI ****
+        child: SafeArea(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (widget.ocorrencia != null || !isBasedOnDenuncia) _buildPhotosSection(),
-              if (isBasedOnDenuncia) _buildVisitDetailsHeader(),
-              const SizedBox(height: 24),
-              _buildSectionTitle('1. Dados da Atividade'),
-              _buildActivitySection(isViewOnly: _isViewMode, isBasedOnDenuncia: isBasedOnDenuncia),
-              const SizedBox(height: 24),
-              _buildSectionTitle('2. Dados do Endereço'),
-              _buildAddressSection(isViewOnly: _isViewMode),
-              const SizedBox(height: 24),
-              _buildSectionTitle('3. Dados do Domicílio'),
-              _buildHouseholdSection(showSprayingSection, isViewOnly: _isViewMode),
-              const SizedBox(height: 24),
-              _buildSectionTitle('4. Captura de Triatomíneo'),
-              _buildCaptureSection(isViewOnly: _isViewMode),
-              if (showSprayingSection) ...[
-                const SizedBox(height: 24),
-                _buildSectionTitle('5. Borrifação'),
-                _buildSprayingSection(isViewOnly: _isViewMode),
-              ],
-              const SizedBox(height: 24),
-              _buildSectionTitle('6. Agente Responsável'),
-              _buildAgentSection(),
-              const SizedBox(height: 32),
-              if (!_isViewMode)
-                ElevatedButton(
-                  onPressed: _isSaving ? null : _saveForm,
-                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                  child: _isSaving
-                      ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-                      : Text(_isNew ? 'Salvar Registro' : 'Salvar Alterações', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (widget.denunciaOrigem != null) ...[
+                        _buildDenunciaContextCard(widget.denunciaOrigem!),
+                        const SizedBox(height: 24),
+                      ],
+                      TextFormField(
+                        controller: _municipioController,
+                        readOnly:
+                        true,
+                        decoration: const InputDecoration(
+                          labelText: 'Município',
+                          border: OutlineInputBorder(),
+                          filled: true,
+                          fillColor: Colors.black12,
+                        ),
+                        validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
+                      ),
+                      const SizedBox(height: 16),
+                      _buildExpansionPanelList(context, titleStyle),
+                    ],
+                  ),
                 ),
+              ),
+              if (!_isViewMode) _buildSaveButton(theme),
             ],
           ),
         ),
       ),
       floatingActionButton: _isViewMode
           ? FloatingActionButton.extended(
-              onPressed: () => setState(() => _isViewMode = false),
-              label: const Text('Editar'),
-              icon: const Icon(Icons.edit),
-            )
+        onPressed: () => setState(() => _isViewMode = false),
+        label: const Text('Editar'),
+        icon: const Icon(Icons.edit),
+      )
           : null,
     );
   }
 
-  // --- UI Section Widgets (RESTORED) ---
-
-  Widget _buildSectionTitle(String title) => Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Text(title, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)));
-
-  Widget _buildPhotosSection() {
-    final allImages = [..._localImagePaths, ..._newlyAddedImages.map((p) => p.path)];
-
-    if (_isViewMode && allImages.isEmpty) return const SizedBox.shrink();
+  Widget _buildDenunciaContextCard(Denuncia denuncia) {
+    final theme = Theme.of(context);
+    String endereco =
+        '${denuncia.rua ?? ''}, ${denuncia.numero ?? ''} - ${denuncia.bairro ?? ''}';
 
     return Card(
-      elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            _buildSectionTitle("Fotos da Visita"),
-            const SizedBox(height: 16),
-            if (allImages.isNotEmpty)
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8),
-                itemCount: allImages.length,
-                itemBuilder: (context, index) {
-                  final imageSource = allImages[index];
-                  return Stack(
-                    alignment: Alignment.topRight,
-                    children: [
-                      ClipRRect(borderRadius: BorderRadius.circular(8), child: SmartImage(imageSource: imageSource)),
-                      if (!_isViewMode)
-                        IconButton(
-                          padding: EdgeInsets.zero, constraints: const BoxConstraints(),
-                          icon: const CircleAvatar(radius: 12, backgroundColor: Colors.black54, child: Icon(Icons.close, color: Colors.white, size: 16)),
-                          onPressed: () => setState(() {
-                            _newlyAddedImages.removeWhere((img) => img.path == imageSource);
-                            _localImagePaths.remove(imageSource);
-                          }),
-                        ),
-                    ],
-                  );
-                },
-              ),
-            if (!_isViewMode) ...[
-              const SizedBox(height: 16),
-              OutlinedButton.icon(icon: const Icon(Icons.camera_alt_outlined), label: const Text('Adicionar Fotos'), onPressed: _showImageSourceDialog),
-            ]
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVisitDetailsHeader() {
-    final denuncia = widget.denunciaOrigem;
-    if (denuncia == null) return const SizedBox.shrink();
-
-    final endereco = [denuncia.rua, denuncia.numero, denuncia.bairro].where((s) => s != null && s.trim().isNotEmpty).join(', ');
-
-    return Card(
-      elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), clipBehavior: Clip.antiAlias,
+      elevation: 4,
+      margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildSectionTitle('Contexto da Denúncia Original'),
+            Text(
+              'Contexto da Denúncia',
+              style: theme.textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 16),
-            const Text('Localização Informada:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Row(children: [const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey), const SizedBox(width: 8), Expanded(child: Text(endereco.isEmpty ? "Endereço não fornecido" : endereco))]),
-            const Divider(height: 24),
-            const Text('Descrição do Morador:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(denuncia.descricao ?? 'Nenhuma descrição fornecida.', style: const TextStyle(color: Colors.black54)),
+            if (denuncia.foto_url != null && denuncia.foto_url!.isNotEmpty) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SmartImage(
+                  imageSource: denuncia.foto_url!,
+                  height: 200,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            _buildInfoRow(
+                context, Icons.description, 'Descrição', denuncia.descricao ?? 'Nenhuma descrição informada'),
+            const SizedBox(height: 8),
+            _buildInfoRow(context, Icons.location_on, 'Endereço', endereco),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildActivitySection({required bool isViewOnly, required bool isBasedOnDenuncia}) {
-    return Card(
-      elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Tipo de Atividade', style: TextStyle(fontWeight: FontWeight.bold)),
+  Widget _buildInfoRow(
+      BuildContext context, IconData icon, String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: Theme.of(context).primaryColor, size: 20),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: Colors.grey.shade600)),
+              Text(value, style: Theme.of(context).textTheme.bodyLarge),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExpansionPanelList(BuildContext context, TextStyle? titleStyle) {
+    final isViewOnly = _isViewMode;
+
+    final List<_FormPanelItem> panelItems = [
+      _FormPanelItem(
+          key: 'atividade',
+          header: '1. Dados da Atividade',
+          body: _buildActivitySection(isViewOnly: isViewOnly)),
+      _FormPanelItem(
+          key: 'domicilio',
+          header: '2. Dados do Domicílio',
+          body: _buildAddressSection(isViewOnly: isViewOnly)),
+      _FormPanelItem(
+          key: 'detalhes_domicilio',
+          header: '3. Detalhes do Domicílio',
+          body: _buildHouseholdDetailsSection(isViewOnly: isViewOnly)),
+      _FormPanelItem(
+          key: 'captura',
+          header: '4. Captura de Triatomíneos',
+          body: _buildCaptureSection(isViewOnly: isViewOnly)),
+      if (_tipoAtividade == TipoAtividade.borrifacao ||
+          _realizarBorrifacaoNoPIT)
+        _FormPanelItem(
+            key: 'borrifacao',
+            header: '5. Borrifação',
+            body: _buildSprayingSection(isViewOnly: isViewOnly)),
+      _FormPanelItem(
+          key: 'etiqueta',
+          header: '6. Código de Etiqueta',
+          body: _buildLabelCodeSection(isViewOnly: isViewOnly)),
+      _FormPanelItem(
+          key: 'fotos',
+          header: '7. Fotos',
+          body: _buildImageSection(isViewOnly: isViewOnly)),
+      _FormPanelItem(
+          key: 'agente',
+          header: '8. Agente Responsável',
+          body: _buildAgentSection()),
+    ];
+
+    return ExpansionPanelList.radio(
+      initialOpenPanelValue: _openPanelKey,
+      expansionCallback: (int index, bool isExpanded) {
+        setState(() {
+          _openPanelKey = isExpanded ? null : panelItems[index].key;
+        });
+      },
+      children: panelItems.map<ExpansionPanelRadio>((item) {
+        return ExpansionPanelRadio(
+          value: item.key,
+          canTapOnHeader: true,
+          headerBuilder: (context, isExpanded) {
+            return Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(item.header, style: titleStyle),
+            );
+          },
+          body: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+            child: item.body,
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildActivitySection({required bool isViewOnly}) {
+    return _FormSection(
+      children: [
+        _buildFieldLabel(context, 'Tipo de Atividade*'),
         ...TipoAtividade.values.map((tipo) => RadioListTile<TipoAtividade>(
-            title: Text(formatEnumName(tipo.name)), 
-            value: tipo, 
-            groupValue: _tipoAtividade, 
-            onChanged: isViewOnly || isBasedOnDenuncia ? null : (v) => setState(() => _tipoAtividade = v))),
-        const Divider(),
+            title: Text(formatEnumName(tipo.name)),
+            value: tipo,
+            groupValue: _tipoAtividade,
+            onChanged:
+            isViewOnly ? null : (v) => setState(() => _tipoAtividade = v))),
+        const SizedBox(height: 16),
         TextFormField(
           controller: _dataAtividadeController,
-          decoration: const InputDecoration(labelText: 'Data da Atividade', border: OutlineInputBorder(), suffixIcon: Icon(Icons.calendar_today)),
+          decoration: const InputDecoration(
+              labelText: 'Data da Atividade*',
+              border: OutlineInputBorder(),
+              suffixIcon: Icon(Icons.calendar_today)),
           readOnly: true,
           onTap: isViewOnly ? null : _selectDate,
-          validator: (v) => (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
+          validator: (v) =>
+          (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
         ),
         if (_tipoAtividade == TipoAtividade.atendimentoPIT) ...[
           const SizedBox(height: 16),
           TextFormField(
             controller: _numeroPITController,
-            readOnly: isViewOnly || isBasedOnDenuncia,
-            decoration: InputDecoration(labelText: 'Número do PIT', border: const OutlineInputBorder(), fillColor: isViewOnly || isBasedOnDenuncia ? Colors.black12 : null, filled: isViewOnly || isBasedOnDenuncia),
+            readOnly: isViewOnly,
+            decoration: InputDecoration(
+              labelText: 'Número do PIT*',
+              border: const OutlineInputBorder(),
+              fillColor: isViewOnly ? Colors.black12 : null,
+              filled: isViewOnly,
+            ),
             keyboardType: TextInputType.number,
-            validator: (v) => (_tipoAtividade == TipoAtividade.atendimentoPIT && (v == null || v.isEmpty)) ? 'Campo obrigatório' : null,
-          ),
-          SwitchListTile(
-            title: const Text('Realizar borrifação nesta visita?'),
-            value: _realizarBorrifacaoNoPIT,
-            onChanged: isViewOnly ? null : (bool value) => setState(() => _realizarBorrifacaoNoPIT = value),
+            validator: (v) =>
+            (_tipoAtividade == TipoAtividade.atendimentoPIT &&
+                (v == null || v.isEmpty))
+                ? 'Campo obrigatório'
+                : null,
           ),
         ],
-      ]))
-    );
-  }
-  
-  Widget _buildAddressSection({required bool isViewOnly}) {
-    return Card(
-      elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        if (!isViewOnly)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16.0),
-            child: OutlinedButton.icon(
-              icon: _isGettingLocation ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.my_location),
-              label: const Text('Usar Minha Localização'),
-              onPressed: _isGettingLocation ? null : _getCurrentLocationAndFillAddress,
-            ),
-          ),
-        TextFormField(controller: _municipioController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Município', border: OutlineInputBorder()), validator: (v) => (v == null || v.isEmpty) ? 'Campo obrigatório' : null),
-        const SizedBox(height: 16),
-        TextFormField(controller: _localidadeController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: '*Localidade', border: OutlineInputBorder()), validator: (v) => (v == null || v.isEmpty) ? 'Campo obrigatório' : null),
-        const SizedBox(height: 16),
-        TextFormField(controller: _enderecoController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Endereço', border: OutlineInputBorder())),
-        const SizedBox(height: 16),
-        TextFormField(controller: _numeroController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Número', border: OutlineInputBorder())),
-        const SizedBox(height: 16),
-        TextFormField(controller: _complementoController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Complemento', border: OutlineInputBorder())),
-      ]))
+      ],
     );
   }
 
-  Widget _buildHouseholdSection(bool showSprayingPendency, {required bool isViewOnly}) {
-    final paredes = ["Alvenaria com reboco", "Alvenaria sem reboco", "Barro com reboco", "Barro sem reboco", "Outros"];
-    final tetos = ["Telha", "Palha", "Madeira", "Nenhum"];
-    
-    return Card(
-      elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Pendência', style: TextStyle(fontWeight: FontWeight.bold)),
-        ...Pendencia.values.map((p) => RadioListTile<Pendencia>(
-            title: Text(formatEnumName(p.name)), value: p,
-            groupValue: showSprayingPendency ? _pendenciaBorrifacao : _pendenciaPesquisa,
-            onChanged: isViewOnly ? null : (v) => setState(() => showSprayingPendency ? _pendenciaBorrifacao = v : _pendenciaPesquisa = v),
-        )),
-        const Divider(height: 24),
-        TextFormField(controller: _nomeMoradorController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Nome do Morador', border: OutlineInputBorder())),
+  Widget _buildAddressSection({required bool isViewOnly}) {
+    return _FormSection(
+      children: [
+        if (!isViewOnly) ...[
+          OutlinedButton.icon(
+            icon: _isGettingLocation
+                ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.my_location),
+            label: const Text('Usar Minha Localização'),
+            onPressed:
+            _isGettingLocation ? null : _getCurrentLocationAndFillAddress,
+          ),
+          const SizedBox(height: 16),
+        ],
+        Wrap(
+          spacing: 16,
+          runSpacing: 16,
+          children: [
+            SizedBox(
+              width: double.infinity,
+              child: TextFormField(
+                  controller: _localidadeController,
+                  readOnly: isViewOnly,
+                  decoration: const InputDecoration(
+                      labelText: 'Localidade*', border: OutlineInputBorder()),
+                  validator: (v) =>
+                  (v == null || v.isEmpty) ? 'Campo obrigatório' : null),
+            ),
+            TextFormField(
+                controller: _codigoLocalidadeController,
+                readOnly: isViewOnly,
+                decoration: const InputDecoration(
+                    labelText: 'Código da Localidade',
+                    border: OutlineInputBorder())),
+            TextFormField(
+                controller: _categoriaLocalidadeController,
+                readOnly: isViewOnly,
+                decoration: const InputDecoration(
+                    labelText: 'Categoria', border: OutlineInputBorder())),
+          ],
+        ),
         const SizedBox(height: 16),
-        const Text('Número Anexo', style: TextStyle(fontWeight: FontWeight.bold)),
-        Wrap(spacing: 4.0, children: List<Widget>.generate(6, (int index) {
-          return ChoiceChip(label: Text(index.toString()), selected: _numeroAnexo == index, onSelected: isViewOnly ? null : (bool selected) => setState(() => _numeroAnexo = selected ? index : null));
-        })),
-        const Divider(height: 24),
-        const Text('Situação do Imóvel', style: TextStyle(fontWeight: FontWeight.bold)),
-        ...SituacaoImovel.values.map((s) => RadioListTile<SituacaoImovel>(title: Text(formatEnumName(s.name)), value: s, groupValue: _situacaoImovel, onChanged: isViewOnly ? null : (v) => setState(() => _situacaoImovel = v))),
-        const Divider(height: 24),
-        DropdownButtonFormField<String>(value: _tipoParede, decoration: const InputDecoration(labelText: 'Tipo de Parede', border: OutlineInputBorder()), items: paredes.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(), onChanged: isViewOnly ? null : (v) => setState(() => _tipoParede = v)),
+        TextFormField(
+            controller: _enderecoController,
+            readOnly: isViewOnly,
+            decoration: const InputDecoration(
+                labelText: 'Endereço (Rua, Avenida, etc)',
+                border: OutlineInputBorder())),
         const SizedBox(height: 16),
-        DropdownButtonFormField<String>(value: _tipoTeto, decoration: const InputDecoration(labelText: 'Tipo de Teto', border: OutlineInputBorder()), items: tetos.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(), onChanged: isViewOnly ? null : (v) => setState(() => _tipoTeto = v)),
-        const Divider(height: 24),
-        const Text('Melhoria Habitacional', style: TextStyle(fontWeight: FontWeight.bold)),
+        Row(
+          children: [
+            Expanded(
+                child: TextFormField(
+                    controller: _numeroController,
+                    readOnly: isViewOnly,
+                    decoration: const InputDecoration(
+                        labelText: 'Número', border: OutlineInputBorder()))),
+            const SizedBox(width: 16),
+            Expanded(
+                child: TextFormField(
+                    controller: _complementoController,
+                    readOnly: isViewOnly,
+                    decoration: const InputDecoration(
+                        labelText: 'Complemento',
+                        border: OutlineInputBorder()))),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHouseholdDetailsSection({required bool isViewOnly}) {
+    final paredes = [
+      "Alvenaria c/ reboco",
+      "Alvenaria s/ reboco",
+      "Barro c/ reboco",
+      "Barro s/ reboco",
+      "Madeira",
+      "Taipa",
+      "Palha",
+      "Outros"
+    ];
+    final tetos = ["Telha", "Palha", "Madeira", "Metálico", "Outros"];
+
+    return _FormSection(
+      children: [
+        _buildPendencySection('Pendência da Pesquisa', _pendenciaPesquisa,
+                (v) => setState(() => _pendenciaPesquisa = v), isViewOnly),
+        const Divider(height: 32),
+        _buildPendencySection('Pendência da Borrifação', _pendenciaBorrifacao,
+                (v) => setState(() => _pendenciaBorrifacao = v), isViewOnly),
+        const Divider(height: 32),
+        TextFormField(
+            controller: _nomeMoradorController,
+            readOnly: isViewOnly,
+            decoration: const InputDecoration(
+                labelText: 'Nome do Morador', border: OutlineInputBorder())),
+        const SizedBox(height: 16),
+        _buildFieldLabel(context, 'Número Anexo*'),
+        Wrap(
+            spacing: 8.0,
+            children: List<Widget>.generate(6, (int index) {
+              return ChoiceChip(
+                  label: Text(index.toString()),
+                  selected: _numeroAnexo == index,
+                  onSelected: isViewOnly
+                      ? null
+                      : (bool selected) => setState(
+                          () => _numeroAnexo = selected ? index : null));
+            })),
+        const Divider(height: 32),
+        _buildFieldLabel(context, 'Situação do Imóvel*'),
+        ...SituacaoImovel.values.map((s) => RadioListTile<SituacaoImovel>(
+            title: Text(formatEnumName(s.name)),
+            value: s,
+            groupValue: _situacaoImovel,
+            onChanged: isViewOnly
+                ? null
+                : (v) => setState(() => _situacaoImovel = v))),
+        const Divider(height: 32),
+        DropdownButtonFormField<String>(
+          value: _tipoParede,
+          decoration: const InputDecoration(
+              labelText: 'Tipo de Parede*', border: OutlineInputBorder()),
+          items:
+          paredes.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
+          onChanged:
+          isViewOnly ? null : (v) => setState(() => _tipoParede = v),
+          validator: (v) => v == null ? 'Campo obrigatório' : null,
+        ),
+        const SizedBox(height: 16),
+        DropdownButtonFormField<String>(
+          value: _tipoTeto,
+          decoration: const InputDecoration(
+              labelText: 'Tipo de Teto*', border: OutlineInputBorder()),
+          items:
+          tetos.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+          onChanged: isViewOnly ? null : (v) => setState(() => _tipoTeto = v),
+          validator: (v) => v == null ? 'Campo obrigatório' : null,
+        ),
+        const Divider(height: 32),
+        _buildFieldLabel(context, 'Melhoria Habitacional*'),
         Row(children: [
-            Expanded(child: RadioListTile<bool?>(title: const Text('Sim'), value: true, groupValue: _melhoriaHabitacional, onChanged: isViewOnly ? null : (v) => setState(() => _melhoriaHabitacional = v))),
-            Expanded(child: RadioListTile<bool?>(title: const Text('Não'), value: false, groupValue: _melhoriaHabitacional, onChanged: isViewOnly ? null : (v) => setState(() => _melhoriaHabitacional = v))),
+          Expanded(
+              child: RadioListTile<bool?>(
+                  title: const Text('Sim'),
+                  value: true,
+                  groupValue: _melhoriaHabitacional,
+                  onChanged: isViewOnly
+                      ? null
+                      : (v) => setState(() => _melhoriaHabitacional = v))),
+          Expanded(
+              child: RadioListTile<bool?>(
+                  title: const Text('Não'),
+                  value: false,
+                  groupValue: _melhoriaHabitacional,
+                  onChanged: isViewOnly
+                      ? null
+                      : (v) => setState(() => _melhoriaHabitacional = v))),
         ]),
-      ]))
+      ],
+    );
+  }
+
+  Widget _buildPendencySection(String title, Pendencia? groupValue,
+      ValueChanged<Pendencia?> onChanged, bool isViewOnly) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildFieldLabel(context, title),
+        ...Pendencia.values.map((p) => RadioListTile<Pendencia>(
+          title: Text(formatEnumName(p.name)),
+          value: p,
+          groupValue: groupValue,
+          onChanged: isViewOnly ? null : onChanged,
+          contentPadding: EdgeInsets.zero,
+        )),
+      ],
     );
   }
 
   Widget _buildCaptureSection({required bool isViewOnly}) {
-    bool intraDisabled = _capturaIntraStatus == CapturaStatus.nenhum;
-    bool periDisabled = _capturaPeriStatus == CapturaStatus.nenhum;
+    return _FormSection(
+      children: [
+        _buildCaptureSubSection(
+          title: 'Captura Intradomicílio',
+          status: _capturaIntraStatus,
+          onStatusChanged: (v) {
+            setState(() => _capturaIntraStatus = v);
+            if (v == CapturaStatus.nenhum) {
+              _numBarbeirosIntraController.text = '0';
+            }
+          },
+          vestigios: _vestigiosIntra,
+          numController: _numBarbeirosIntraController,
+          isViewOnly: isViewOnly,
+        ),
+        const Divider(height: 32),
+        _buildCaptureSubSection(
+          title: 'Captura Peridomicílio',
+          status: _capturaPeriStatus,
+          onStatusChanged: (v) {
+            setState(() => _capturaPeriStatus = v);
+            if (v == CapturaStatus.nenhum) {
+              _numBarbeirosPeriController.text = '0';
+            }
+          },
+          vestigios: _vestigiosPeri,
+          numController: _numBarbeirosPeriController,
+          isViewOnly: isViewOnly,
+        ),
+      ],
+    );
+  }
 
-    return Card(
-      elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Captura Intradomicílio', style: TextStyle(fontWeight: FontWeight.bold)),
-        ...CapturaStatus.values.map((s) => RadioListTile<CapturaStatus>(contentPadding: EdgeInsets.zero, title: Text(formatEnumName(s.name)), value: s, groupValue: _capturaIntraStatus, onChanged: isViewOnly ? null : (v) => setState(() => _capturaIntraStatus = v))),
-        AbsorbPointer(absorbing: isViewOnly || intraDisabled, child: Opacity(opacity: isViewOnly || intraDisabled ? 0.5 : 1.0, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          TextFormField(controller: _numBarbeirosIntraController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Nº de Barbeiros Capturados'), keyboardType: TextInputType.number),
-          const SizedBox(height: 8), const Text('Vestígios Encontrados:'),
-          ..._vestigiosIntra.keys.map((key) => CheckboxListTile(title: Text(key), value: _vestigiosIntra[key], onChanged: isViewOnly ? null : (value) => _handleVestigiosChange(_vestigiosIntra, key, value!)))
-        ]))),
-        const Divider(height: 24),
-        const Text('Captura Peridomicílio', style: TextStyle(fontWeight: FontWeight.bold)),
-        ...CapturaStatus.values.map((s) => RadioListTile<CapturaStatus>(contentPadding: EdgeInsets.zero, title: Text(formatEnumName(s.name)), value: s, groupValue: _capturaPeriStatus, onChanged: isViewOnly ? null : (v) => setState(() => _capturaPeriStatus = v))),
-        AbsorbPointer(absorbing: isViewOnly || periDisabled, child: Opacity(opacity: isViewOnly || periDisabled ? 0.5 : 1.0, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          TextFormField(controller: _numBarbeirosPeriController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Nº de Barbeiros Capturados'), keyboardType: TextInputType.number),
-          const SizedBox(height: 8), const Text('Vestígios Encontrados:'),
-          ..._vestigiosPeri.keys.map((key) => CheckboxListTile(title: Text(key), value: _vestigiosPeri[key], onChanged: isViewOnly ? null : (value) => _handleVestigiosChange(_vestigiosPeri, key, value!)))
-        ]))),
-      ]))
+  Widget _buildCaptureSubSection({
+    required String title,
+    required CapturaStatus? status,
+    required ValueChanged<CapturaStatus?> onStatusChanged,
+    required Map<String, bool> vestigios,
+    required TextEditingController numController,
+    required bool isViewOnly,
+  }) {
+    final isTriatomineo = status == CapturaStatus.triatomineo;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildFieldLabel(context, title),
+        ...CapturaStatus.values.map((s) => RadioListTile<CapturaStatus>(
+          title: Text(formatEnumName(s.name)),
+          value: s,
+          groupValue: status,
+          onChanged: isViewOnly ? null : onStatusChanged,
+        )),
+        const SizedBox(height: 16),
+        _buildFieldLabel(context, 'Vestígios Encontrados'),
+        ...vestigios.keys.map((key) => CheckboxListTile(
+          title: Text(key),
+          value: vestigios[key],
+          onChanged: isViewOnly
+              ? null
+              : (val) => _handleVestigiosChange(vestigios, key, val!),
+        )),
+        if (isTriatomineo) ...[
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: numController,
+            readOnly: isViewOnly,
+            decoration: const InputDecoration(
+              labelText: 'Número de Barbeiros Capturados',
+              border: OutlineInputBorder(),
+            ),
+            keyboardType: TextInputType.number,
+            validator: (v) {
+              if (isTriatomineo &&
+                  (v == null || v.isEmpty || int.tryParse(v) == 0)) {
+                return 'Informe a quantidade';
+              }
+              return null;
+            },
+          ),
+        ]
+      ],
+    );
+  }
+
+  Widget _buildImageSection({required bool isViewOnly}) {
+    final allImages =
+    [..._localImagePaths, ..._newlyAddedImages.map((f) => f.path)];
+    final canAddMore = allImages.length < 4;
+
+    return _FormSection(
+      children: [
+        if (allImages.isEmpty)
+          const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 24.0),
+                child: Text('Nenhuma foto adicionada.'),
+              )),
+        if (allImages.isNotEmpty)
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: allImages.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemBuilder: (context, index) {
+              final imagePath = allImages[index];
+              return Stack(
+                fit: StackFit.expand,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child:
+                    SmartImage(imageSource: imagePath, fit: BoxFit.cover),
+                  ),
+                  if (!isViewOnly)
+                    Positioned(
+                      top: -4,
+                      right: -4,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          icon: const Icon(Icons.close,
+                              color: Colors.white, size: 18),
+                          onPressed: () {
+                            setState(() {
+                              if (_newlyAddedImages
+                                  .any((x) => x.path == imagePath)) {
+                                _newlyAddedImages
+                                    .removeWhere((x) => x.path == imagePath);
+                              } else {
+                                _localImagePaths.remove(imagePath);
+                              }
+                            });
+                          },
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        if (!isViewOnly) ...[
+          const SizedBox(height: 16),
+          Center(
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.add_a_photo),
+              label: const Text('Adicionar Foto'),
+              onPressed: canAddMore ? _showImageSourceDialog : null,
+            ),
+          ),
+          if (!canAddMore)
+            const Padding(
+              padding: EdgeInsets.only(top: 8.0),
+              child: Center(
+                child: Text('Limite de 4 fotos atingido.',
+                    style: TextStyle(color: Colors.grey)),
+              ),
+            ),
+        ],
+      ],
     );
   }
 
   Widget _buildSprayingSection({required bool isViewOnly}) {
-    final inseticidas = ["Alfacipermetrina", "Deltametrina"];
-    return Card(
-      elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        DropdownButtonFormField<String>(value: _inseticidaController.text.isEmpty ? null : _inseticidaController.text, decoration: const InputDecoration(labelText: 'Inseticida', border: OutlineInputBorder()), items: inseticidas.map((i) => DropdownMenuItem(value: i, child: Text(i))).toList(), onChanged: isViewOnly ? null : (v) => setState(() => _inseticidaController.text = v!)),
-        const SizedBox(height: 16),
-        TextFormField(controller: _numCargasController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Número de Cargas', border: OutlineInputBorder()), keyboardType: TextInputType.number),
-        const SizedBox(height: 16),
-        TextFormField(controller: _codigoEtiquetaController, readOnly: isViewOnly, decoration: const InputDecoration(labelText: 'Código da Etiqueta', border: OutlineInputBorder())),
-      ]))
-    );
-  }
-  
-  Widget _buildAgentSection() {
-     return Card(
-      elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(padding: const EdgeInsets.all(16.0), child: 
+    return _FormSection(
+      children: [
         TextFormField(
-          controller: _agenteController,
-          readOnly: true,
-          decoration: const InputDecoration(labelText: 'Agente de Endemias', border: OutlineInputBorder(), fillColor: Colors.black12, filled: true),
+          controller: _inseticidaController,
+          readOnly: isViewOnly,
+          decoration: const InputDecoration(
+              labelText: 'Inseticida*', border: OutlineInputBorder()),
+          validator: (v) {
+            if ((_tipoAtividade == TipoAtividade.borrifacao ||
+                _realizarBorrifacaoNoPIT) &&
+                (v == null || v.isEmpty)) {
+              return 'Obrigatório para borrifação';
+            }
+            return null;
+          },
         ),
-      )
+        const SizedBox(height: 16),
+        _buildFieldLabel(context, "Número de Cargas*"),
+        Wrap(
+          spacing: 8.0,
+          children: List<Widget>.generate(6, (int index) {
+            return ChoiceChip(
+              label: Text(index.toString()),
+              selected: _numCargasController.text == index.toString(),
+              onSelected: isViewOnly
+                  ? null
+                  : (bool selected) => setState(() =>
+              _numCargasController.text =
+              selected ? index.toString() : '0'),
+            );
+          }),
+        ),
+      ],
     );
   }
 
-  // --- Helper Methods (RESTORED) ---
-  
+  Widget _buildLabelCodeSection({required bool isViewOnly}) {
+    return _FormSection(
+      children: [
+        TextFormField(
+          controller: _codigoEtiquetaController,
+          readOnly: isViewOnly,
+          decoration: const InputDecoration(
+              labelText: 'Código de Etiqueta',
+              border: OutlineInputBorder()),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAgentSection() {
+    return _FormSection(
+      children: [
+        _buildFieldLabel(context, 'Agente de Combate às Endemias'),
+        TextFormField(
+          controller: _agenteController,
+          readOnly: true,
+          decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              fillColor: Colors.black12,
+              filled: true),
+        ),
+      ],
+    );
+  }
+
   Future<void> _selectDate() async {
-    final DateTime? picked = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now());
-    if (picked != null) {
-      setState(() => _dataAtividadeController.text = DateFormat('dd/MM/yyyy').format(picked));
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate:
+      DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ??
+          DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+    if (pickedDate != null) {
+      setState(() {
+        _dataAtividadeController.text =
+            DateFormat('dd/MM/yyyy').format(pickedDate);
+      });
+    }
+  }
+
+  void _showImageSourceDialog() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: <Widget>[
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Galeria'),
+              onTap: () {
+                _pickImage(ImageSource.gallery);
+                Navigator.of(context).pop();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera),
+              title: const Text('Câmera'),
+              onTap: () {
+                _pickImage(ImageSource.camera);
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    try {
+      final pickedFile =
+      await picker.pickImage(source: source, imageQuality: 80);
+      if (pickedFile != null) {
+        setState(() {
+          _newlyAddedImages.add(pickedFile);
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao selecionar imagem: $e')),
+      );
     }
   }
 
@@ -548,59 +1019,113 @@ class _RegistroOcorrenciaAgenteScreenState
     setState(() => _isGettingLocation = true);
     try {
       final position = await LocationUtil.getCurrentPosition();
-      final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
-      if (placemarks.isNotEmpty) {
-        final place = placemarks.first;
+      if (position != null) {
         setState(() {
-          _municipioController.text = place.subAdministrativeArea ?? '';
-          _localidadeController.text = place.subLocality ?? place.locality ?? '';
-          _enderecoController.text = place.street ?? '';
-          _numeroController.text = place.subThoroughfare ?? '';
           _currentLat = position.latitude;
           _currentLng = position.longitude;
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Endereço preenchido!'), backgroundColor: Colors.green));
+
+        final placemarks = await placemarkFromCoordinates(
+          position.latitude,
+          position.longitude,
+        );
+
+        if (placemarks.isNotEmpty) {
+          final p = placemarks.first;
+          setState(() {
+            _localidadeController.text =
+                p.subLocality ?? _localidadeController.text;
+            _enderecoController.text = p.street ?? _enderecoController.text;
+            _numeroController.text =
+                p.subThoroughfare ?? _numeroController.text;
+            _municipioController.text =
+                p.subAdministrativeArea ?? _municipioController.text;
+          });
+        }
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Endereço preenchido com a localização.')));
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao obter localização: $e'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Não foi possível obter a localização: $e')),
+      );
     } finally {
-      if (mounted) setState(() => _isGettingLocation = false);
+      setState(() => _isGettingLocation = false);
     }
   }
 
-  Future<void> _showImageSourceDialog() async {
-    showModalBottomSheet(context: context, builder: (BuildContext context) {
-      return SafeArea(child: Wrap(children: <Widget>[
-          ListTile(leading: const Icon(Icons.photo_library), title: const Text('Galeria'), onTap: () { _pickImage(ImageSource.gallery); Navigator.of(context).pop(); }),
-          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Câmera'), onTap: () { _pickImage(ImageSource.camera); Navigator.of(context).pop(); }),
-      ]));
-    });
-  }
-
-  Future<void> _pickImage(ImageSource source) async {
-    final picker = ImagePicker();
-    try {
-      if (source == ImageSource.gallery) {
-        final pickedFiles = await picker.pickMultiImage(imageQuality: 80, maxWidth: 1024);
-        setState(() => _newlyAddedImages.addAll(pickedFiles));
-      } else {
-        final pickedFile = await picker.pickImage(source: source, imageQuality: 80, maxWidth: 1024);
-        if (pickedFile != null) setState(() => _newlyAddedImages.add(pickedFile));
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao selecionar imagens: $e'), backgroundColor: Colors.red));
-    }
-  }
-
-  void _handleVestigiosChange(Map<String, bool> vestigios, String key, bool value) {
+  void _handleVestigiosChange(
+      Map<String, bool> vestigios, String key, bool value) {
     setState(() {
-      if (key == 'Nenhum' && value) {
-        vestigios.updateAll((k, v) => false);
-        vestigios['Nenhum'] = true;
+      if (key == 'Nenhum') {
+        vestigios.updateAll((_, __) => false);
+        vestigios['Nenhum'] = value;
       } else {
         vestigios[key] = value;
-        if (value) vestigios['Nenhum'] = false;
+        if (value) {
+          vestigios['Nenhum'] = false;
+        } else if (vestigios.values.every((v) => !v)) {
+          vestigios['Nenhum'] = true;
+        }
       }
     });
   }
+
+  Widget _buildFieldLabel(BuildContext context, String label) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0),
+      child: Text(
+        label,
+        style: Theme.of(context)
+            .textTheme
+            .bodyLarge
+            ?.copyWith(fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  Widget _buildSaveButton(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: ElevatedButton(
+        onPressed: _isSaving ? null : _saveForm,
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          minimumSize: const Size(double.infinity, 50),
+          textStyle: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.onPrimary,
+          ),
+        ),
+        child: _isSaving
+            ? const SizedBox(
+            height: 24,
+            width: 24,
+            child: CircularProgressIndicator(
+                color: Colors.white, strokeWidth: 3))
+            : Text(_isNew ? 'Salvar Registro' : 'Salvar Alterações'),
+      ),
+    );
+  }
+}
+
+class _FormSection extends StatelessWidget {
+  final List<Widget> children;
+  const _FormSection({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+}
+
+class _FormPanelItem {
+  final String key;
+  final String header;
+  final Widget body;
+
+  _FormPanelItem({required this.key, required this.header, required this.body});
 }
