@@ -5,13 +5,14 @@ import 'package:hive/hive.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:vector_tracker_app/core/app_logger.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
-import 'package:vector_tracker_app/services/hive_sync_service.dart';
 
 class DenunciaService with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
   final Box _denunciasCache = Hive.box('denuncias_cache');
   final Box _pendingDenunciasBox = Hive.box('pending_denuncias');
   final Box _localidadesCache = Hive.box('localidades_cache');
+  
+  StreamSubscription<ConnectivityResult>? _connectivitySubscription;
 
   List<Map<String, dynamic>> _items = [];
   List<Map<String, dynamic>> get items => _items;
@@ -25,25 +26,59 @@ class DenunciaService with ChangeNotifier {
   bool _isLocalidadesLoading = false;
   bool get isLocalidadesLoading => _isLocalidadesLoading;
 
-  late HiveSyncService _syncService;
+  bool _isSyncing = false;
 
   DenunciaService() {
     _listenToConnectivity();
   }
 
-  void setSyncService(HiveSyncService service) {
-    _syncService = service;
-  }
-
   void _listenToConnectivity() {
-    Connectivity().onConnectivityChanged.listen((ConnectivityResult connectivityResult) {
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((connectivityResult) {
       final isOnline = connectivityResult == ConnectivityResult.mobile ||
                       connectivityResult == ConnectivityResult.wifi;
       if (isOnline) {
         AppLogger.info('Conexão detectada no DenunciaService, sincronizando...');
-        _syncService.syncAll();
+        syncPendingDenuncias();
       }
     });
+  }
+  
+  @override
+  void dispose() {
+    _connectivitySubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> syncPendingDenuncias() async {
+    if (_isSyncing) return;
+    _isSyncing = true;
+
+    final pending = _pendingDenunciasBox.values.toList();
+    if (pending.isEmpty) {
+      _isSyncing = false;
+      return;
+    }
+    
+    AppLogger.sync('Sincronizando ${pending.length} denúncias pendentes.');
+
+    for (var denunciaData in pending) {
+      try {
+        final denunciaMap = Map<String, dynamic>.from(denunciaData as Map);
+        final id = denunciaMap['id'];
+
+        // Lógica de upload de foto, se houver
+
+        await _supabase.from('denuncias').upsert(denunciaMap);
+        await _pendingDenunciasBox.delete(id);
+        AppLogger.sync('Denúncia $id sincronizada com sucesso.');
+
+      } catch (e, s) {
+        AppLogger.error('Erro ao sincronizar denúncia', e, s);
+      }
+    }
+
+    _isSyncing = false;
+    await fetchItems(); // Atualiza a lista após a sincronização
   }
 
   Future<void> fetchItems() async {
@@ -51,6 +86,7 @@ class DenunciaService with ChangeNotifier {
     notifyListeners();
 
     try {
+      // Carrega do cache local primeiro
       final List<Map<String, dynamic>> allItems = [];
       final cached = _denunciasCache.values.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       allItems.addAll(cached);
@@ -62,7 +98,9 @@ class DenunciaService with ChangeNotifier {
         uniqueItems[item['id']] = item;
       }
       _items = uniqueItems.values.toList();
+      notifyListeners();
 
+      // Se online, busca do Supabase e atualiza o cache
       final connectivityResult = await Connectivity().checkConnectivity();
       final isOnline = connectivityResult == ConnectivityResult.mobile || 
                       connectivityResult == ConnectivityResult.wifi;
@@ -71,6 +109,7 @@ class DenunciaService with ChangeNotifier {
         final response = await _supabase.from('denuncias').select();
         final remoteItems = List<Map<String, dynamic>>.from(response);
         
+        await _denunciasCache.clear();
         for (var item in remoteItems) {
           _denunciasCache.put(item['id'], item);
         }
@@ -97,8 +136,8 @@ class DenunciaService with ChangeNotifier {
     data['status'] = 'pendente_envio';
 
     await _pendingDenunciasBox.put(denuncia.id, data);
-    fetchItems();
-    _syncService.syncAll();
+    await fetchItems(); // Atualiza a UI imediatamente
+    syncPendingDenuncias(); // Tenta sincronizar
   }
 
   Future<void> fetchLocalidades() async {
@@ -111,6 +150,7 @@ class DenunciaService with ChangeNotifier {
     try {
       if (_localidadesCache.isNotEmpty) {
         _localidades = _localidadesCache.values.map((e) => (e as Map)['nome'] as String).toList();
+        notifyListeners();
       }
 
       final connectivityResult = await (Connectivity().checkConnectivity());

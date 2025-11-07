@@ -1,22 +1,27 @@
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-// import 'package:uuid/uuid.dart'; // Será adicionado quando necessário
+import 'package:uuid/uuid.dart';
+import 'package:vector_tracker_app/models/ocorrencia_enums.dart'; // <<< ADICIONADO
 import '../models/ocorrencia.dart';
 import '../repositories/ocorrencia_repository.dart';
 import '../repositories/agente_repository.dart';
 import '../core/app_logger.dart';
-import '../core/exceptions.dart';
-import '../core/service_locator.dart';
 
-/// Serviço de ocorrências específico para agentes
-/// 
+// Classe auxiliar que movi do final do arquivo para o topo para clareza
+class SyncResult {
+  final bool success;
+  final String message;
+  SyncResult({required this.success, required this.message});
+}
+
+/// Serviço de ocorrências específico para agentes (VERSÃO CORRIGIDA)
+///
 /// ETAPA 4: Implementa offline-first com status_sincronizacao e RLS.
 class AgentOcorrenciaService with ChangeNotifier {
   final OcorrenciaRepository _ocorrenciaRepository;
   final AgenteRepository _agenteRepository;
-  final Box _pendingBox = Hive.box('pending_ocorrencias');
-  // final _uuid = const Uuid(); // Será inicializado quando necessário
+  final _uuid = const Uuid();
 
   List<Ocorrencia> _ocorrencias = [];
   List<Ocorrencia> get ocorrencias => _ocorrencias;
@@ -27,7 +32,8 @@ class AgentOcorrenciaService with ChangeNotifier {
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
 
-  int get pendingSyncCount => _pendingBox.length;
+  int get pendingSyncCount =>
+      _ocorrencias.where((o) => !o.sincronizado).length;
 
   AgentOcorrenciaService({
     required OcorrenciaRepository ocorrenciaRepository,
@@ -35,261 +41,169 @@ class AgentOcorrenciaService with ChangeNotifier {
   })  : _ocorrenciaRepository = ocorrenciaRepository,
         _agenteRepository = agenteRepository;
 
-  /// Busca ocorrências do agente com cache offline-first
+  /// Busca ocorrências do agente com estratégia offline-first.
   Future<void> fetchOcorrencias({bool showLoading = true}) async {
     try {
-      if (showLoading) {
-        _setLoading(true);
-      }
-
+      if (showLoading) _setLoading(true);
       AppLogger.info('Buscando ocorrências do agente');
 
-      // Primeira: busca do cache local
-      final cachedOcorrencias = await _loadFromCache();
-      if (cachedOcorrencias.isNotEmpty) {
-        _ocorrencias = cachedOcorrencias;
+      // 1. Carrega do cache para uma resposta rápida
+      final cachedOcorrencias =
+      await _ocorrenciaRepository.getOcorrenciasFromCache();
+      _ocorrencias = cachedOcorrencias;
+      notifyListeners();
+      AppLogger.info(
+          '${cachedOcorrencias.length} ocorrências carregadas do cache');
+
+      // 2. Mescla com itens pendentes que ainda não foram para o cache
+      final pendingOcorrencias =
+      await _ocorrenciaRepository.getFromPendingBox();
+      _mergeLists(pendingOcorrencias);
+      notifyListeners();
+
+      // 3. Tenta buscar da nuvem para atualizar
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final isOnline = connectivityResult == ConnectivityResult.mobile ||
+          connectivityResult == ConnectivityResult.wifi;
+
+      if (isOnline) {
+        AppLogger.info("Buscando dados frescos da nuvem...");
+        final onlineOcorrencias =
+        await _ocorrenciaRepository.fetchAllOcorrenciasFromSupabase();
+        _ocorrencias = onlineOcorrencias; // A lista principal agora é a da nuvem
+        _mergeLists(
+            pendingOcorrencias); // Re-mescla pendentes com a lista fresca
         notifyListeners();
-        AppLogger.info('${cachedOcorrencias.length} ocorrências carregadas do cache');
+        AppLogger.info('✓ Ocorrências sincronizadas com a nuvem.');
       }
-
-      // Segunda: tenta buscar do Supabase
-      try {
-        final onlineOcorrencias = await _ocorrenciaRepository.fetchAllOcorrencias();
-        
-        // Filtra apenas as ocorrências do agente (RLS já faz isso, mas garante)
-        final agente = await _agenteRepository.getCurrentAgent();
-        final filteredOcorrencias = onlineOcorrencias.where((o) => 
-          o.municipio == agente?.municipioNome || o.localidade?.contains(agente?.setorNome ?? '') == true
-        ).toList();
-
-        // Mescla com ocorrências pendentes localmente
-        final mergedOcorrencias = await _mergeWithPending(filteredOcorrencias);
-        
-        _ocorrencias = mergedOcorrencias;
-        notifyListeners();
-        
-        AppLogger.info('✓ ${mergedOcorrencias.length} ocorrências sincronizadas');
-
-      } on NetworkException catch (e) {
-        AppLogger.warning('Sem conectividade, usando cache: $e');
-        // Continua com dados do cache
-      } catch (e, stackTrace) {
-        AppLogger.error('Erro ao buscar ocorrências online', e, stackTrace);
-        // Continua com dados do cache
-      }
-
     } catch (e, stackTrace) {
       AppLogger.error('Erro crítico ao buscar ocorrências', e, stackTrace);
     } finally {
-      if (showLoading) {
-        _setLoading(false);
-      }
+      if (showLoading) _setLoading(false);
     }
   }
 
-  /// Salva ocorrência com estratégia offline-first
+  /// Salva ocorrência com estratégia offline-first.
   Future<Ocorrencia> saveOcorrencia(Ocorrencia ocorrencia) async {
     try {
-      AppLogger.info('Salvando ocorrência ${ocorrencia.id != null ? "(editando)" : "(nova)"}');
+      AppLogger.info(
+          'Salvando ocorrência: ${ocorrencia.id}');
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final isOnline = connectivityResult == ConnectivityResult.mobile ||
+          connectivityResult == ConnectivityResult.wifi;
 
-      final connectivity = await Connectivity().checkConnectivity();
-      final isOnline = connectivity.contains(ConnectivityResult.mobile) || 
-                      connectivity.contains(ConnectivityResult.wifi);
-
-      late Ocorrencia savedOcorrencia;
+      final agente = await _agenteRepository.getCurrentAgent();
+      Ocorrencia ocorrenciaToSave = ocorrencia.id.isEmpty
+          ? ocorrencia.copyWith(
+          id: _uuid.v4(), // Garante um ID local
+          agente_id: agente?.id,
+          municipio_id: agente?.municipioId,
+          setor_id: agente?.setorId)
+          : ocorrencia;
 
       if (isOnline) {
         try {
-          // Tenta salvar diretamente no Supabase
-          if (ocorrencia.id != null) {
-            savedOcorrencia = await _ocorrenciaRepository.updateOcorrencia(ocorrencia);
-          } else {
-            // Adiciona dados do agente atual
-            final agente = await _agenteRepository.getCurrentAgent();
-            final ocorrenciaWithAgent = ocorrencia.copyWith(
-              municipio: agente?.municipioNome,
-              localidade: agente?.setorNome,
-            );
-            savedOcorrencia = await _ocorrenciaRepository.insertOcorrencia(ocorrenciaWithAgent);
-          }
-          
-          AppLogger.info('✓ Ocorrência salva online');
-          
+          // Tenta salvar diretamente na nuvem
+          final syncedOcorrencia =
+          await _ocorrenciaRepository.insertInSupabase(ocorrenciaToSave);
+          _updateLocalList(syncedOcorrencia.copyWith(sincronizado: true));
+          return syncedOcorrencia;
         } catch (e) {
           AppLogger.warning('Falha ao salvar online, salvando localmente: $e');
-          savedOcorrencia = await _savePending(ocorrencia);
+          await _ocorrenciaRepository.saveToPendingBox(ocorrenciaToSave);
+          _updateLocalList(ocorrenciaToSave.copyWith(sincronizado: false));
+          return ocorrenciaToSave;
         }
       } else {
         // Salva localmente para sincronização posterior
-        savedOcorrencia = await _savePending(ocorrencia);
-        AppLogger.info('Ocorrência salva offline para sincronização');
+        AppLogger.info('Offline. Ocorrência salva para sincronização.');
+        await _ocorrenciaRepository.saveToPendingBox(ocorrenciaToSave);
+        _updateLocalList(ocorrenciaToSave.copyWith(sincronizado: false));
+        return ocorrenciaToSave;
       }
-
-      // Atualiza lista local
-      await _updateLocalList(savedOcorrencia);
-      
-      return savedOcorrencia;
-
     } catch (e, stackTrace) {
       AppLogger.error('Erro ao salvar ocorrência', e, stackTrace);
       rethrow;
     }
   }
 
-  /// Sincroniza ocorrências pendentes
+  /// Sincroniza ocorrências pendentes.
   Future<SyncResult> syncPendingOcorrencias() async {
     if (_isSyncing) {
-      AppLogger.debug('Sync já em andamento');
       return SyncResult(success: false, message: 'Sincronização já em andamento');
     }
+    _setSyncing(true);
 
     try {
-      _isSyncing = true;
-      notifyListeners();
-
       AppLogger.sync('Iniciando sincronização de ocorrências pendentes');
-
-      final connectivity = await Connectivity().checkConnectivity();
-      final isOnline = connectivity.contains(ConnectivityResult.mobile) || 
-                      connectivity.contains(ConnectivityResult.wifi);
-
-      if (!isOnline) {
+      final connectivityResult = await Connectivity().checkConnectivity();
+      if (connectivityResult == ConnectivityResult.none) {
         return SyncResult(success: false, message: 'Sem conexão com a internet');
       }
 
-      final pendingKeys = _pendingBox.keys.toList();
-      if (pendingKeys.isEmpty) {
-        AppLogger.sync('Nenhuma ocorrência pendente para sincronizar');
+      final pendingList = await _ocorrenciaRepository.getFromPendingBox();
+      if (pendingList.isEmpty) {
         return SyncResult(success: true, message: 'Nenhuma pendência encontrada');
       }
 
       int successCount = 0;
       int errorCount = 0;
 
-      for (var key in pendingKeys) {
+      for (var ocorrencia in pendingList) {
         try {
-          final data = Map<String, dynamic>.from(_pendingBox.get(key));
-          final ocorrencia = Ocorrencia.fromMap(data);
-
-          // Tenta sincronizar com Supabase
-          Ocorrencia synced;
-          if (ocorrencia.id != null) {
-            synced = await _ocorrenciaRepository.updateOcorrencia(ocorrencia);
-          } else {
-            synced = await _ocorrenciaRepository.insertOcorrencia(ocorrencia);
-          }
+          // Tenta sincronizar com o Supabase
+          final synced = await _ocorrenciaRepository.insertInSupabase(ocorrencia);
 
           // Remove da fila pendente
-          await _pendingBox.delete(key);
-          
-          // Atualiza na lista local
-          await _updateLocalList(synced);
-          
-          successCount++;
-          AppLogger.sync('✓ Ocorrência $key sincronizada');
+          await _ocorrenciaRepository.deleteFromPendingBox(ocorrencia.id);
 
+          // Atualiza na lista local
+          _updateLocalList(synced.copyWith(sincronizado: true));
+          successCount++;
+          AppLogger.sync('✓ Ocorrência ${ocorrencia.id} sincronizada');
         } catch (e, stackTrace) {
-          AppLogger.error('Erro ao sincronizar ocorrência $key', e, stackTrace);
+          AppLogger.error(
+              'Erro ao sincronizar ocorrência ${ocorrencia.id}', e, stackTrace);
           errorCount++;
         }
       }
 
-      final message = successCount > 0 
+      final message = successCount > 0
           ? 'Sincronizadas $successCount ocorrências${errorCount > 0 ? ', $errorCount falharam' : ''}'
           : 'Falha ao sincronizar todas as ocorrências';
 
       AppLogger.sync('Sincronização concluída: $message');
       return SyncResult(success: successCount > 0, message: message);
-
     } catch (e, stackTrace) {
       AppLogger.error('Erro durante sincronização', e, stackTrace);
       return SyncResult(success: false, message: 'Erro na sincronização: $e');
     } finally {
-      _isSyncing = false;
-      notifyListeners();
+      _setSyncing(false);
     }
   }
 
-  /// Carrega ocorrências do cache local
-  Future<List<Ocorrencia>> _loadFromCache() async {
-    try {
-      final cacheBox = ServiceLocator.getNamed<Box>('ocorrencias_cache');
-      final cached = cacheBox.values
-          .whereType<Map>()
-          .map((data) => Ocorrencia.fromMap(Map<String, dynamic>.from(data)))
-          .toList();
-      
-      // Ordena por data mais recente
-      cached.sort((a, b) => (b.dataAtividade ?? DateTime(1900)).compareTo(a.dataAtividade ?? DateTime(1900)));
-      
-      return cached;
-    } catch (e, stackTrace) {
-      AppLogger.error('Erro ao carregar cache de ocorrências', e, stackTrace);
-      return [];
+  /// Mescla uma lista de ocorrências com a lista principal em memória.
+  void _mergeLists(List<Ocorrencia> toMerge) {
+    final tempMap = {for (var o in _ocorrencias) o.id: o};
+    for (var o in toMerge) {
+      tempMap[o.id] = o;
     }
+    _ocorrencias = tempMap.values.toList();
+    _ocorrencias.sort((a, b) => (b.data_atividade ?? DateTime(0))
+        .compareTo(a.data_atividade ?? DateTime(0)));
   }
 
-  /// Mescla ocorrências online com pendentes localmente
-  Future<List<Ocorrencia>> _mergeWithPending(List<Ocorrencia> onlineOcorrencias) async {
-    try {
-      final pending = _pendingBox.values
-          .whereType<Map>()
-          .map((data) => Ocorrencia.fromMap(Map<String, dynamic>.from(data)))
-          .toList();
-
-      final merged = <String, Ocorrencia>{};
-      
-      // Adiciona online
-      for (var ocorrencia in onlineOcorrencias) {
-        if (ocorrencia.id != null) {
-          merged[ocorrencia.id!] = ocorrencia;
-        }
-      }
-      
-      // Adiciona/sobrescreve pendentes
-      for (var ocorrencia in pending) {
-        final key = ocorrencia.id ?? ocorrencia.localId ?? 'temp_${DateTime.now().millisecondsSinceEpoch}';
-        merged[key] = ocorrencia.copyWith(isPending: true);
-      }
-
-      final result = merged.values.toList();
-      result.sort((a, b) => (b.dataAtividade ?? DateTime(1900)).compareTo(a.dataAtividade ?? DateTime(1900)));
-      
-      return result;
-    } catch (e, stackTrace) {
-      AppLogger.error('Erro ao mesclar ocorrências', e, stackTrace);
-      return onlineOcorrencias;
+  /// Adiciona ou atualiza uma única ocorrência na lista em memória.
+  void _updateLocalList(Ocorrencia ocorrencia) {
+    final index = _ocorrencias.indexWhere((o) => o.id == ocorrencia.id);
+    if (index != -1) {
+      _ocorrencias[index] = ocorrencia;
+    } else {
+      _ocorrencias.insert(0, ocorrencia);
     }
-  }
-
-  /// Salva ocorrência como pendente
-  Future<Ocorrencia> _savePending(Ocorrencia ocorrencia) async {
-    final localId = ocorrencia.localId ?? _uuid.v4();
-    final pendingOcorrencia = ocorrencia.copyWith(
-      localId: localId,
-      isPending: true,
-    );
-
-    await _pendingBox.put(localId, pendingOcorrencia.toMap());
-    return pendingOcorrencia;
-  }
-
-  /// Atualiza lista local com ocorrência
-  Future<void> _updateLocalList(Ocorrencia ocorrencia) async {
-    final key = ocorrencia.id ?? ocorrencia.localId;
-    if (key != null) {
-      final index = _ocorrencias.indexWhere((o) => (o.id ?? o.localId) == key);
-      
-      if (index != -1) {
-        _ocorrencias[index] = ocorrencia;
-      } else {
-        _ocorrencias.insert(0, ocorrencia);
-      }
-      
-      // Reordena
-      _ocorrencias.sort((a, b) => (b.dataAtividade ?? DateTime(1900)).compareTo(a.dataAtividade ?? DateTime(1900)));
-      notifyListeners();
-    }
+    _ocorrencias.sort((a, b) => (b.data_atividade ?? DateTime(0))
+        .compareTo(a.data_atividade ?? DateTime(0)));
+    notifyListeners();
   }
 
   void _setLoading(bool loading) {
@@ -299,17 +213,16 @@ class AgentOcorrenciaService with ChangeNotifier {
     }
   }
 
-  /// Force refresh
+  void _setSyncing(bool syncing) {
+    if (_isSyncing != syncing) {
+      _isSyncing = syncing;
+      notifyListeners();
+    }
+  }
+
+  /// Força a atualização dos dados da nuvem.
   Future<void> forceRefresh() async {
     AppLogger.info('Force refresh de ocorrências solicitado');
     await fetchOcorrencias(showLoading: true);
   }
-}
-
-/// Resultado de sincronização
-class SyncResult {
-  final bool success;
-  final String message;
-
-  SyncResult({required this.success, required this.message});
 }

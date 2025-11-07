@@ -10,38 +10,26 @@ import 'package:uuid/uuid.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
 import 'package:vector_tracker_app/models/ocorrencia.dart';
 import 'package:vector_tracker_app/models/ocorrencia_enums.dart';
-import 'package:vector_tracker_app/services/agent_service.dart';
+import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
+import 'package:vector_tracker_app/repositories/agente_repository.dart';
 import 'package:vector_tracker_app/util/location_util.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 import 'package:vector_tracker_app/widgets/smart_image.dart';
 
-// Helper to format Enum names for display
 String formatEnumName(String name) {
   switch (name) {
-    case 'pesquisa':
-      return 'Pesquisa';
-    case 'borrifacao':
-      return 'Borrifação';
-    case 'atendimentoPIT':
-      return 'Atendimento ao PIT';
-    case 'reconhecida':
-      return 'Reconhecida (já foi pesquisada)';
-    case 'nova':
-      return 'Nova (primeira pesquisa)';
-    case 'demolida':
-      return 'Demolida';
-    case 'semPendencias':
-      return 'Sem pendências';
-    case 'fechado':
-      return 'Domicílio fechado';
-    case 'recusa':
-      return 'Recusa';
-    case 'triatomineo':
-      return 'Triatomíneo';
-    case 'nenhum':
-      return 'Nenhum';
-    default:
-      return name;
+    case 'pesquisa': return 'Pesquisa';
+    case 'borrifacao': return 'Borrifação';
+    case 'atendimentoPIT': return 'Atendimento ao PIT';
+    case 'reconhecida': return 'Reconhecida (já foi pesquisada)';
+    case 'nova': return 'Nova (primeira pesquisa)';
+    case 'demolida': return 'Demolida';
+    case 'semPendencias': return 'Sem pendências';
+    case 'fechado': return 'Domicílio fechado';
+    case 'recusa': return 'Recusa';
+    case 'triatomineo': return 'Triatomíneo';
+    case 'nenhum': return 'Nenhum';
+    default: return name;
   }
 }
 
@@ -53,7 +41,10 @@ class RegistroOcorrenciaAgenteScreen extends StatefulWidget {
     super.key,
     this.ocorrencia,
     this.denunciaOrigem,
+    this.isViewOnly = false,
   });
+
+  final bool isViewOnly;
 
   @override
   _RegistroOcorrenciaAgenteScreenState createState() =>
@@ -62,7 +53,6 @@ class RegistroOcorrenciaAgenteScreen extends StatefulWidget {
 
 class _RegistroOcorrenciaAgenteScreenState
     extends State<RegistroOcorrenciaAgenteScreen> {
-  // FORM STATE AND CONTROLLERS
   final _formKey = GlobalKey<FormState>();
   late bool _isNew;
   late bool _isViewMode;
@@ -108,11 +98,22 @@ class _RegistroOcorrenciaAgenteScreenState
   void initState() {
     super.initState();
     _isNew = widget.ocorrencia == null;
-    _isViewMode = !_isNew;
+    _isViewMode = widget.isViewOnly;
 
-    final agent = context.read<AgentService>().currentAgent;
-    _agenteController.text = agent?.nome ?? 'Agente Não Identificado';
-    _municipioController.text = agent?.municipioNome ?? 'Dom Inocêncio';
+    // --- CORREÇÃO APLICADA (Passo 3) ---
+    // Busca os dados do agente do novo repositório, de forma assíncrona.
+    final agentRepository = context.read<AgenteRepository>();
+    agentRepository.getCurrentAgent().then((agent) {
+        if (mounted) {
+          setState(() {
+            _agenteController.text = agent?.nome ?? 'Agente Não Identificado';
+            _municipioController.text = agent?.municipioNome ?? 'Dom Inocêncio';
+             if (_isNew && widget.denunciaOrigem == null) {
+                _localidadeController.text = agent?.localidade ?? '';
+             }
+          });
+        }
+    });
 
     if (widget.ocorrencia != null) {
       _populateFromOcorrencia(widget.ocorrencia!);
@@ -121,7 +122,6 @@ class _RegistroOcorrenciaAgenteScreenState
     } else {
       _dataAtividadeController.text =
           DateFormat('dd/MM/yyyy').format(DateTime.now());
-      _localidadeController.text = agent?.localidade ?? '';
     }
   }
 
@@ -161,12 +161,13 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   void _populateFromDenuncia(Denuncia den) {
-    final agent = context.read<AgentService>().currentAgent;
+    // --- CORREÇÃO APLICADA (Passo 3) ---
+    // A referência ao 'agent' foi removida pois os dados agora são carregados no initState.
     _tipoAtividade = null;
     _dataAtividadeController.text =
         DateFormat('dd/MM/yyyy').format(DateTime.now());
-    _municipioController.text = den.cidade ?? agent?.municipioId ?? '';
-    _localidadeController.text = den.bairro ?? agent?.localidade ?? '';
+    _municipioController.text = den.cidade ?? _municipioController.text;
+    _localidadeController.text = den.bairro ?? '';
     _enderecoController.text = den.rua ?? '';
     _numeroController.text = den.numero ?? '';
     _complementoController.text = den.bairro ?? '';
@@ -195,7 +196,11 @@ class _RegistroOcorrenciaAgenteScreenState
     super.dispose();
   }
 
+  // --- CORREÇÃO APLICADA (Passo 4) ---
+  // O método _saveForm foi completamente substituído para usar a nova lógica de serviço.
   Future<void> _saveForm() async {
+    if (_isViewMode) return;
+
     if (!_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -206,24 +211,18 @@ class _RegistroOcorrenciaAgenteScreenState
     }
     setState(() => _isSaving = true);
 
-    final agentService = context.read<AgentService>();
-    final agent = agentService.currentAgent;
+    final agentOcorrenciaService = context.read<AgentOcorrenciaService>();
 
-    final id = widget.ocorrencia?.id ?? const Uuid().v4();
     final dataAtividade =
         DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ??
             DateTime.now();
-    final allImagePaths = [
-      ..._localImagePaths,
-      ..._newlyAddedImages.map((f) => f.path)
-    ];
 
-    final ocorrencia = Ocorrencia(
-      id: id,
-      agente_id: agent?.id,
+    final ocorrenciaToSave = Ocorrencia(
+      id: widget.ocorrencia?.id ?? '',
+      agente_id: widget.ocorrencia?.agente_id,
       denuncia_id: widget.denunciaOrigem?.id,
       municipio_id: _municipioController.text,
-      setor_id: agent?.setorId,
+      setor_id: widget.ocorrencia?.setor_id,
       tipo_atividade: _tipoAtividade,
       data_atividade: dataAtividade,
       numero_pit: _numeroPITController.text,
@@ -260,20 +259,18 @@ class _RegistroOcorrenciaAgenteScreenState
       codigo_etiqueta: _codigoEtiquetaController.text,
       latitude: _currentLat,
       longitude: _currentLng,
-      localImagePaths: allImagePaths,
-      created_at: DateTime.now(),
+      localImagePaths: [..._localImagePaths, ..._newlyAddedImages.map((f) => f.path)],
+      created_at: widget.ocorrencia?.created_at ?? DateTime.now(),
+      sincronizado: widget.ocorrencia?.sincronizado ?? false,
     );
 
     try {
-      if (_isNew) {
-        await agentService.criarOcorrencia(ocorrencia);
-      } else {
-        await agentService.editarOcorrencia(ocorrencia);
-      }
+      await agentOcorrenciaService.saveOcorrencia(ocorrenciaToSave);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(_isNew
-                ? 'Ocorrência salva localmente!'
+                ? 'Ocorrência salva com sucesso!'
                 : 'Alterações salvas!'),
             backgroundColor: Colors.green));
         Navigator.of(context).pop(true);
@@ -281,7 +278,7 @@ class _RegistroOcorrenciaAgenteScreenState
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Erro ao salvar: ${e.toString()}'),
+            content: Text('Erro ao salvar: \${e.toString()}'),
             backgroundColor: Colors.red));
       }
     } finally {
@@ -305,7 +302,6 @@ class _RegistroOcorrenciaAgenteScreenState
       ),
       body: Form(
         key: _formKey,
-        // **** CORREÇÃO ADICIONADA AQUI ****
         child: SafeArea(
           child: Column(
             children: [
@@ -356,7 +352,7 @@ class _RegistroOcorrenciaAgenteScreenState
   Widget _buildDenunciaContextCard(Denuncia denuncia) {
     final theme = Theme.of(context);
     String endereco =
-        '${denuncia.rua ?? ''}, ${denuncia.numero ?? ''} - ${denuncia.bairro ?? ''}';
+        '\${denuncia.rua ?? ''}, \${denuncia.numero ?? ''} - \${denuncia.bairro ?? ''}';
 
     return Card(
       elevation: 4,
@@ -1010,7 +1006,7 @@ class _RegistroOcorrenciaAgenteScreenState
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao selecionar imagem: $e')),
+        SnackBar(content: Text('Erro ao selecionar imagem: \$e')),
       );
     }
   }
@@ -1047,7 +1043,7 @@ class _RegistroOcorrenciaAgenteScreenState
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Não foi possível obter a localização: $e')),
+        SnackBar(content: Text('Não foi possível obter a localização: \$e')),
       );
     } finally {
       setState(() => _isGettingLocation = false);

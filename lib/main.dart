@@ -8,21 +8,15 @@ import 'package:vector_tracker_app/core/app_config.dart';
 import 'package:vector_tracker_app/core/app_logger.dart';
 import 'package:vector_tracker_app/core/service_locator.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
-import 'package:vector_tracker_app/models/ocorrencia_siocchagas.dart';
-import 'package:vector_tracker_app/services/agent_service.dart';
+import 'package:vector_tracker_app/repositories/agente_repository.dart';
+import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
-import 'package:vector_tracker_app/services/hive_sync_service.dart';
-import 'package:vector_tracker_app/services/ocorrencia_siocchagas_service.dart';
-
-// CORREÇÃO FINALÍSSIMA: Usando snake_case para os nomes dos arquivos, como deveria ser.
 import 'package:vector_tracker_app/screens/pendencias_list_screen.dart';
 import 'package:vector_tracker_app/screens/sincronizar_list_screen.dart';
 import 'package:vector_tracker_app/screens/meu_trabalho_list_screen.dart';
-
 import 'package:vector_tracker_app/screens/login_screen.dart';
 import 'package:vector_tracker_app/screens/community_home_screen.dart';
 import 'package:vector_tracker_app/screens/agent_home_screen.dart';
-import 'package:vector_tracker_app/screens/painel_ace_screen.dart';
 import 'package:vector_tracker_app/screens/educacao_screen.dart';
 import 'package:vector_tracker_app/screens/denuncia_screen.dart';
 import 'package:vector_tracker_app/screens/mapa_denuncias_screen.dart';
@@ -30,7 +24,6 @@ import 'package:vector_tracker_app/screens/minhas_denuncias_screen.dart';
 import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
 
 late final DenunciaService denunciaService;
-late final HiveSyncService syncService;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,15 +41,12 @@ Future<void> main() async {
     final appDocumentDir = await getApplicationDocumentsDirectory();
     await Hive.initFlutter(appDocumentDir.path);
 
-    Hive.registerAdapter(OcorrenciaSiocchagasAdapter());
-
     await Hive.openBox('denuncias_cache');
-    await Hive.openBox('pending_sync');
     await Hive.openBox('pending_denuncias');
     await Hive.openBox('localidades_cache');
     await Hive.openBox('ocorrencias_cache');
-    await Hive.openBox<OcorrenciaSiocchagas>('ocorrencias_siocchagas');
-    
+    await Hive.openBox('pending_ocorrencias');
+
     AppLogger.info('✓ Hive inicializado');
 
     await ServiceLocator.setup();
@@ -66,7 +56,7 @@ Future<void> main() async {
     AppLogger.error('Erro na inicialização principal', e, stackTrace);
     AppLogger.warning('Iniciando em modo de fallback...');
 
-     await Supabase.initialize(
+    await Supabase.initialize(
       url: 'https://wcxiziyrjiqvhmxvpfga.supabase.co',
       anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjeGl6aXlyamlxdmhteHZwZmdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkyOTg2NDksImV4cCI6MjA3NDg3NDY0OX0.EGNXOT3IhSVLR41q5xE2JGx-gPahQpwkwsitH1wJVLY',
     );
@@ -74,28 +64,25 @@ Future<void> main() async {
     final appDocumentDir = await getApplicationDocumentsDirectory();
     await Hive.initFlutter(appDocumentDir.path);
 
-    Hive.registerAdapter(OcorrenciaSiocchagasAdapter());
-
     await Hive.openBox('denuncias_cache');
-    await Hive.openBox('pending_sync');
     await Hive.openBox('pending_denuncias');
     await Hive.openBox('localidades_cache');
     await Hive.openBox('ocorrencias_cache');
-    await Hive.openBox<OcorrenciaSiocchagas>('ocorrencias_siocchagas');
-    
+    await Hive.openBox('pending_ocorrencias');
+
     await ServiceLocator.setup();
     AppLogger.info('✓ Service Locator configurado no modo de fallback');
   }
 
   denunciaService = ServiceLocator.get<DenunciaService>();
-  syncService = ServiceLocator.get<HiveSyncService>();
 
   runApp(
     MultiProvider(
       providers: [
+        // CORREÇÃO: Fornece o AgenteRepository para todo o app.
+        Provider(create: (_) => ServiceLocator.get<AgenteRepository>()),
         ChangeNotifierProvider.value(value: denunciaService),
-        ChangeNotifierProvider(create: (_) => ServiceLocator.get<AgentService>()),
-        ChangeNotifierProvider(create: (_) => ServiceLocator.get<OcorrenciaSiocchagasService>()),
+        ChangeNotifierProvider(create: (_) => ServiceLocator.get<AgentOcorrenciaService>()),
       ],
       child: const MyApp(),
     ),
@@ -104,23 +91,8 @@ Future<void> main() async {
 
 final supabase = Supabase.instance.client;
 
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget {
   const MyApp({super.key});
-
-  @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        syncService.start();
-      }
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -145,29 +117,20 @@ class _MyAppState extends State<MyApp> {
         '/login': (context) => const LoginScreen(),
         '/community_home': (context) => const CommunityHomeScreen(),
         '/agent_home': (context) => const AgentHomeScreen(),
-        '/painel_agente': (context) => const PainelAceScreen(),
         '/educacao': (context) => const EducacaoScreen(),
         '/denuncia': (context) => const DenunciaScreen(),
         '/mapa_denuncias': (context) => const MapaDenunciasScreen(),
         '/minhas_denuncias': (context) => const MinhasDenunciasScreen(),
         '/registro_ocorrencia': (context) => const RegistroOcorrenciaAgenteScreen(),
-
-        // ROTAS CORRIGIDAS PARA APONTAR PARA AS NOVAS TELAS DE LISTA
         '/pendencias_localidade': (context) => const PendenciasListScreen(),
-
-        // ROTA UNIFICADA: Aponta para o novo formulário mestre.
         '/novo_registro_proativo': (context) => const RegistroOcorrenciaAgenteScreen(),
-        
         '/meu_trabalho': (context) => const MeuTrabalhoListScreen(),
         '/sincronizar_dados': (context) => const SincronizarListScreen(),
-        
-        // ROTA UNIFICADA: Aponta para o novo formulário mestre, passando a denúncia.
         '/atendimento_denuncia': (context) {
           final args = ModalRoute.of(context)?.settings.arguments;
           if (args is Denuncia) {
             return RegistroOcorrenciaAgenteScreen(denunciaOrigem: args);
           }
-          // Fallback or error screen if arguments are not correct
           return Scaffold(
             appBar: AppBar(title: const Text('Erro')),
             body: const Center(
