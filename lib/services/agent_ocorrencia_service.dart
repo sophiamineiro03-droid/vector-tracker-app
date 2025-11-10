@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:uuid/uuid.dart';
-import 'package:vector_tracker_app/models/ocorrencia_enums.dart'; // <<< ADICIONADO
+import 'package:vector_tracker_app/models/ocorrencia_enums.dart'; 
 import '../models/ocorrencia.dart';
 import '../repositories/ocorrencia_repository.dart';
 import '../repositories/agente_repository.dart';
@@ -93,12 +93,12 @@ class AgentOcorrenciaService with ChangeNotifier {
           connectivityResult == ConnectivityResult.wifi;
 
       final agente = await _agenteRepository.getCurrentAgent();
+
       Ocorrencia ocorrenciaToSave = ocorrencia.id.isEmpty
           ? ocorrencia.copyWith(
-          id: _uuid.v4(), // Garante um ID local
-          agente_id: agente?.id,
-          municipio_id: agente?.municipioId,
-          setor_id: agente?.setorId)
+              id: _uuid.v4(), // Garante um ID local
+              agente_id: agente?.id,
+            )
           : ocorrencia;
 
       if (isOnline) {

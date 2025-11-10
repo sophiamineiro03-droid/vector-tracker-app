@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -8,11 +9,11 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final _formKey = GlobalKey<FormState>(); // Chave para validar o formulário
   int _selectedTab = 1; // 0 para Comunidade, 1 para Agente
   bool _isLoading = false;
   bool _obscureText = true;
 
-  // Os controllers são mantidos apenas para a UI, sem uso na lógica.
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
@@ -23,21 +24,62 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // Lógica de navegação direta, sem validações.
-  void _handleEnter() {
+  // Lógica de login atualizada para usar Supabase
+  Future<void> _handleEnter() async {
+    // A lógica para a aba "Comunidade" permanece a mesma, sem login.
+    if (_selectedTab == 0) {
+      Navigator.pushReplacementNamed(context, '/community_home');
+      return;
+    }
+
+    // Valida o formulário para o Agente. Se os campos estiverem vazios, mostra o erro.
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
     setState(() => _isLoading = true);
 
-    // Navega diretamente para a tela selecionada, espelhando o comportamento da aba "Comunidade".
-    if (_selectedTab == 1) { // Agente
-      Navigator.pushReplacementNamed(context, '/agent_home');
-    } else { // Comunidade
-      Navigator.pushReplacementNamed(context, '/community_home');
-    }
-    
-    // O setState abaixo pode não ser chamado se a navegação for muito rápida,
-    // mas é uma boa prática para caso a navegação seja impedida no futuro.
-    if(mounted) {
-      setState(() => _isLoading = false);
+    try {
+      final email = _emailController.text.trim();
+      final password = _passwordController.text.trim();
+      final supabase = Supabase.instance.client;
+
+      // Envia as credenciais para o Supabase
+      await supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      // Se o código chegou aqui, o login foi um sucesso.
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/agent_home');
+      }
+
+    } on AuthException catch (error) {
+      // Captura erros de autenticação (email/senha errados, usuário não confirmado, etc.)
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(error.message),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } catch (error) {
+      // Captura outros erros (ex: falta de conexão com a internet)
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Ocorreu um erro inesperado. Tente novamente.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      // Garante que o indicador de "carregando" pare, independente do resultado.
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -66,51 +108,67 @@ class _LoginScreenState extends State<LoginScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
                   child: Padding(
                     padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Image.asset('assets/logo.png', height: 100), // <-- CORREÇÃO APLICADA
-                        const SizedBox(height: 24.0),
-                        _buildTabSelector(context, accentColor),
-                        const SizedBox(height: 24.0),
-                        TextFormField(
-                          controller: _emailController,
-                          decoration: InputDecoration(
-                            labelText: 'Email',
-                            prefixIcon: const Icon(Icons.email_outlined),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
-                          ),
-                          keyboardType: TextInputType.emailAddress,
-                        ),
-                        const SizedBox(height: 16.0),
-                        TextFormField(
-                          controller: _passwordController,
-                          obscureText: _obscureText,
-                          decoration: InputDecoration(
-                            labelText: 'Senha',
-                            prefixIcon: const Icon(Icons.lock_outline),
-                            suffixIcon: IconButton(
-                              icon: Icon(_obscureText ? Icons.visibility_off : Icons.visibility),
-                              onPressed: () => setState(() => _obscureText = !_obscureText),
+                    // O Form é usado para agrupar e validar os campos de texto
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Image.asset('assets/logo.png', height: 100),
+                          const SizedBox(height: 24.0),
+                          _buildTabSelector(context, accentColor),
+                          const SizedBox(height: 24.0),
+                          TextFormField(
+                            controller: _emailController,
+                            decoration: InputDecoration(
+                              labelText: 'Email',
+                              prefixIcon: const Icon(Icons.email_outlined),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
                             ),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
+                            keyboardType: TextInputType.emailAddress,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Por favor, digite seu e-mail';
+                              }
+                              return null;
+                            },
                           ),
-                        ),
-                        const SizedBox(height: 24.0),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accentColor,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
+                          const SizedBox(height: 16.0),
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: _obscureText,
+                            decoration: InputDecoration(
+                              labelText: 'Senha',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                icon: Icon(_obscureText ? Icons.visibility_off : Icons.visibility),
+                                onPressed: () => setState(() => _obscureText = !_obscureText),
+                              ),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12.0)),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Por favor, digite sua senha';
+                              }
+                              return null;
+                            },
                           ),
-                          onPressed: _isLoading ? null : _handleEnter,
-                          child: _isLoading 
-                              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3)) 
-                              : const Text('Entrar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        ),
-                      ],
+                          const SizedBox(height: 24.0),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: accentColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
+                            ),
+                            onPressed: _isLoading ? null : _handleEnter,
+                            child: _isLoading
+                                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
+                                : const Text('Entrar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -141,7 +199,12 @@ class _LoginScreenState extends State<LoginScreen> {
     final isSelected = _selectedTab == index;
     return Expanded(
       child: GestureDetector(
-        onTap: () => setState(() => _selectedTab = index),
+        onTap: () {
+          // Só permite mudar de aba se não estiver carregando
+          if (!_isLoading) {
+            setState(() => _selectedTab = index);
+          }
+        },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(

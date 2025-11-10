@@ -32,6 +32,7 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
   final _cidadeController = TextEditingController();
   final _estadoController = TextEditingController();
   final _numeroController = TextEditingController();
+  final _complementoController = TextEditingController();
 
   double? _latitude;
   double? _longitude;
@@ -55,6 +56,7 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     _cidadeController.text = denuncia.cidade ?? '';
     _estadoController.text = denuncia.estado ?? '';
     _numeroController.text = denuncia.numero ?? '';
+    _complementoController.text = denuncia.complemento ?? '';
     _latitude = denuncia.latitude;
     _longitude = denuncia.longitude;
     if ((denuncia.rua ?? '').isNotEmpty) {
@@ -158,6 +160,7 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
         cidade: _cidadeController.text,
         estado: _estadoController.text,
         numero: _numeroController.text,
+        complemento: _complementoController.text,
         foto_url: _pickedImage?.path,
         createdAt: DateTime.now(),
         status: 'Pendente',
@@ -339,6 +342,11 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
               validator: (value) => (value ?? '').isEmpty ? 'O número é obrigatório' : null,
             ),
             const SizedBox(height: 10),
+            TextFormField(
+              controller: _complementoController,
+              decoration: const InputDecoration(labelText: 'Complemento (Opcional)', border: OutlineInputBorder()),
+            ),
+            const SizedBox(height: 10),
             TextFormField(controller: _ruaController, decoration: const InputDecoration(labelText: 'Rua', border: OutlineInputBorder())),
             const SizedBox(height: 10),
             TextFormField(controller: _bairroController, decoration: const InputDecoration(labelText: 'Bairro', border: OutlineInputBorder())),
@@ -362,12 +370,14 @@ class ImageSourceSheet extends StatelessWidget {
       child: Wrap(
         children: <Widget>[
           ListTile(
-            leading: const Icon(Icons.photo_library), title: const Text('Galeria'),
-            onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+            leading: const Icon(Icons.camera_alt),
+            title: const Text('Tirar foto com a Câmera'),
+            onTap: () => Navigator.of(context).pop(ImageSource.camera),
           ),
           ListTile(
-            leading: const Icon(Icons.photo_camera), title: const Text('Câmera'),
-            onTap: () => Navigator.of(context).pop(ImageSource.camera),
+            leading: const Icon(Icons.photo_library),
+            title: const Text('Escolher da Galeria'),
+            onTap: () => Navigator.of(context).pop(ImageSource.gallery),
           ),
         ],
       ),

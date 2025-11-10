@@ -12,6 +12,7 @@ class Denuncia {
   final String? cidade;
   final String? estado;
   final String? numero;
+  final String? complemento; // <<< ADICIONADO
   final String? foto_url;
   final DateTime? createdAt;
   final String? status;
@@ -27,6 +28,7 @@ class Denuncia {
     this.cidade,
     this.estado,
     this.numero,
+    this.complemento, // <<< ADICIONADO
     this.foto_url,
     this.createdAt,
     this.status,
@@ -43,6 +45,7 @@ class Denuncia {
     String? cidade,
     String? estado,
     String? numero,
+    String? complemento, // <<< ADICIONADO
     String? foto_url,
     DateTime? createdAt,
     String? status,
@@ -58,6 +61,7 @@ class Denuncia {
       cidade: cidade ?? this.cidade,
       estado: estado ?? this.estado,
       numero: numero ?? this.numero,
+      complemento: complemento ?? this.complemento, // <<< ADICIONADO
       foto_url: foto_url ?? this.foto_url,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
@@ -76,6 +80,7 @@ class Denuncia {
       'cidade': cidade,
       'estado': estado,
       'numero_casa': numero,
+      'complemento': complemento, // <<< ADICIONADO
       'foto_url': foto_url,
       'criada_em': createdAt?.toIso8601String(),
       'status': status,
@@ -94,6 +99,7 @@ class Denuncia {
       cidade: map['cidade'],
       estado: map['estado'],
       numero: map['numero_casa'],
+      complemento: map['complemento'], // <<< ADICIONADO
       foto_url: map['foto_url'],
       createdAt: map['criada_em'] != null ? DateTime.parse(map['criada_em']) : null,
       status: map['status'],

@@ -12,12 +12,10 @@ class MeuTrabalhoListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // CORREÇÃO: O Consumer agora usa o novo 'AgentOcorrenciaService'
     return Consumer<AgentOcorrenciaService>(
       builder: (context, agentService, child) {
-        
         final concluidas =
-            agentService.ocorrencias.where((o) => o.sincronizado == true).toList();
+            agentService.ocorrencias.where((o) => o.sincronizado).toList();
 
         return Scaffold(
           appBar: const GradientAppBar(title: 'Meu Trabalho (Concluído)'),
@@ -45,6 +43,9 @@ class MeuTrabalhoListScreen extends StatelessWidget {
         ? DateFormat('dd/MM/yyyy').format(ocorrencia.data_atividade!)
         : 'Data indisponível';
 
+    // --- CORREÇÃO APLICADA AQUI ---
+    final atividades = ocorrencia.tipo_atividade?.map((e) => e.displayName).join(', ') ?? 'Não especificada';
+
     return Card(
       elevation: 2,
       margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -54,9 +55,8 @@ class MeuTrabalhoListScreen extends StatelessWidget {
           endereco,
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        subtitle:
-            Text('Atividade de ${ocorrencia.tipo_atividade?.displayName} em $data'),
-        // CORREÇÃO: O clique agora funciona e passa o isViewOnly.
+        // E a variável é usada aqui
+        subtitle: Text('Atividade de $atividades em $data'),
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
             builder: (context) =>

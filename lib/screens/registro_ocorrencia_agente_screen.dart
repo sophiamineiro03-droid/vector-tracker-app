@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
+import 'package:vector_tracker_app/models/agente.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
 import 'package:vector_tracker_app/models/ocorrencia.dart';
 import 'package:vector_tracker_app/models/ocorrencia_enums.dart';
@@ -18,18 +19,30 @@ import 'package:vector_tracker_app/widgets/smart_image.dart';
 
 String formatEnumName(String name) {
   switch (name) {
-    case 'pesquisa': return 'Pesquisa';
-    case 'borrifacao': return 'Borrifação';
-    case 'atendimentoPIT': return 'Atendimento ao PIT';
-    case 'reconhecida': return 'Reconhecida (já foi pesquisada)';
-    case 'nova': return 'Nova (primeira pesquisa)';
-    case 'demolida': return 'Demolida';
-    case 'semPendencias': return 'Sem pendências';
-    case 'fechado': return 'Domicílio fechado';
-    case 'recusa': return 'Recusa';
-    case 'triatomineo': return 'Triatomíneo';
-    case 'nenhum': return 'Nenhum';
-    default: return name;
+    case 'pesquisa':
+      return 'Pesquisa';
+    case 'borrifacao':
+      return 'Borrifação';
+    case 'atendimentoPIT':
+      return 'Atendimento ao PIT';
+    case 'reconhecida':
+      return 'Reconhecida (já foi pesquisada)';
+    case 'nova':
+      return 'Nova (primeira pesquisa)';
+    case 'demolida':
+      return 'Demolida';
+    case 'semPendencias':
+      return 'Sem pendências';
+    case 'fechado':
+      return 'Domicílio fechado';
+    case 'recusa':
+      return 'Recusa';
+    case 'triatomineo':
+      return 'Triatomíneo';
+    case 'nenhum':
+      return 'Nenhum';
+    default:
+      return name;
   }
 }
 
@@ -81,7 +94,7 @@ class _RegistroOcorrenciaAgenteScreenState
   final _codigoEtiquetaController = TextEditingController();
   final _agenteController = TextEditingController();
 
-  TipoAtividade? _tipoAtividade = TipoAtividade.pesquisa;
+  final Set<TipoAtividade> _tiposAtividade = {TipoAtividade.pesquisa};
   bool _realizarBorrifacaoNoPIT = false;
   SituacaoImovel? _situacaoImovel;
   Pendencia? _pendenciaPesquisa = Pendencia.semPendencias;
@@ -100,19 +113,18 @@ class _RegistroOcorrenciaAgenteScreenState
     _isNew = widget.ocorrencia == null;
     _isViewMode = widget.isViewOnly;
 
-    // --- CORREÇÃO APLICADA (Passo 3) ---
-    // Busca os dados do agente do novo repositório, de forma assíncrona.
-    final agentRepository = context.read<AgenteRepository>();
-    agentRepository.getCurrentAgent().then((agent) {
-        if (mounted) {
-          setState(() {
-            _agenteController.text = agent?.nome ?? 'Agente Não Identificado';
-            _municipioController.text = agent?.municipioNome ?? 'Dom Inocêncio';
-             if (_isNew && widget.denunciaOrigem == null) {
-                _localidadeController.text = agent?.localidade ?? '';
-             }
-          });
-        }
+    context.read<AgenteRepository>().getCurrentAgent().then((agent) {
+      if (mounted && agent != null) {
+        setState(() {
+          _agenteController.text = agent.nome;
+          _municipioController.text = agent.municipioNome ?? '';
+          // Se é um registro novo (sem ser de uma denúncia) e o agente tem localidades
+          if (_isNew && widget.denunciaOrigem == null && agent.localidades.isNotEmpty) {
+            // Preenche o campo com a primeira localidade da lista do agente
+            _localidadeController.text = agent.localidades.first;
+          }
+        });
+      }
     });
 
     if (widget.ocorrencia != null) {
@@ -135,10 +147,10 @@ class _RegistroOcorrenciaAgenteScreenState
     _currentLat = oco.latitude;
     _currentLng = oco.longitude;
     _numeroPITController.text = oco.numero_pit ?? '';
-    _municipioController.text = oco.municipio_id ?? '';
+    _municipioController.text = oco.municipio_id_ui ?? '';
     _codigoLocalidadeController.text = oco.codigo_localidade ?? '';
     _categoriaLocalidadeController.text = oco.categoria_localidade ?? '';
-    _localidadeController.text = oco.localidade ?? '';
+    _localidadeController.text = oco.localidade_ui ?? '';
     _enderecoController.text = oco.endereco ?? '';
     _numeroController.text = oco.numero ?? '';
     _complementoController.text = oco.complemento ?? '';
@@ -150,7 +162,16 @@ class _RegistroOcorrenciaAgenteScreenState
     _inseticidaController.text = oco.inseticida ?? '';
     _numCargasController.text = oco.numero_cargas?.toString() ?? '0';
     _codigoEtiquetaController.text = oco.codigo_etiqueta ?? '';
-    _tipoAtividade = oco.tipo_atividade;
+
+    setState(() {
+      _tiposAtividade.clear();
+      if (oco.tipo_atividade != null) {
+        for (var tipo in oco.tipo_atividade!) {
+          _tiposAtividade.add(tipo);
+        }
+      }
+    });
+
     _situacaoImovel = oco.situacao_imovel;
     _pendenciaPesquisa = oco.pendencia_pesquisa;
     _pendenciaBorrifacao = oco.pendencia_borrifacao;
@@ -161,16 +182,17 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   void _populateFromDenuncia(Denuncia den) {
-    // --- CORREÇÃO APLICADA (Passo 3) ---
-    // A referência ao 'agent' foi removida pois os dados agora são carregados no initState.
-    _tipoAtividade = null;
+    setState(() {
+      _tiposAtividade.clear();
+    });
+
     _dataAtividadeController.text =
         DateFormat('dd/MM/yyyy').format(DateTime.now());
     _municipioController.text = den.cidade ?? _municipioController.text;
-    _localidadeController.text = den.bairro ?? '';
+    _localidadeController.text = den.localidade ?? '';
     _enderecoController.text = den.rua ?? '';
     _numeroController.text = den.numero ?? '';
-    _complementoController.text = den.bairro ?? '';
+    _complementoController.text = den.complemento ?? '';
     _currentLat = den.latitude;
     _currentLng = den.longitude;
   }
@@ -196,8 +218,6 @@ class _RegistroOcorrenciaAgenteScreenState
     super.dispose();
   }
 
-  // --- CORREÇÃO APLICADA (Passo 4) ---
-  // O método _saveForm foi completamente substituído para usar a nova lógica de serviço.
   Future<void> _saveForm() async {
     if (_isViewMode) return;
 
@@ -218,17 +238,15 @@ class _RegistroOcorrenciaAgenteScreenState
             DateTime.now();
 
     final ocorrenciaToSave = Ocorrencia(
-      id: widget.ocorrencia?.id ?? '',
-      agente_id: widget.ocorrencia?.agente_id,
+      id: widget.ocorrencia?.id ?? Uuid().v4(),
+      agente_id: context.read<AgenteRepository>().getCurrentAgent().toString(),
       denuncia_id: widget.denunciaOrigem?.id,
-      municipio_id: _municipioController.text,
-      setor_id: widget.ocorrencia?.setor_id,
-      tipo_atividade: _tipoAtividade,
+      localidade_id: widget.ocorrencia?.localidade_id,
+      tipo_atividade: _tiposAtividade.toList(),
       data_atividade: dataAtividade,
       numero_pit: _numeroPITController.text,
       codigo_localidade: _codigoLocalidadeController.text,
       categoria_localidade: _categoriaLocalidadeController.text,
-      localidade: _localidadeController.text,
       endereco: _enderecoController.text,
       numero: _numeroController.text,
       complemento: _complementoController.text,
@@ -259,9 +277,15 @@ class _RegistroOcorrenciaAgenteScreenState
       codigo_etiqueta: _codigoEtiquetaController.text,
       latitude: _currentLat,
       longitude: _currentLng,
-      localImagePaths: [..._localImagePaths, ..._newlyAddedImages.map((f) => f.path)],
       created_at: widget.ocorrencia?.created_at ?? DateTime.now(),
-      sincronizado: widget.ocorrencia?.sincronizado ?? false,
+      localImagePaths: [
+        ..._localImagePaths,
+        ..._newlyAddedImages.map((f) => f.path)
+      ],
+      sincronizado: false,
+      municipio_id_ui: _municipioController.text,
+      localidade_ui: _localidadeController.text,
+      setor_id_ui: widget.ocorrencia?.setor_id_ui,
     );
 
     try {
@@ -269,16 +293,15 @@ class _RegistroOcorrenciaAgenteScreenState
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(_isNew
-                ? 'Ocorrência salva com sucesso!'
-                : 'Alterações salvas!'),
+            content: Text(
+                _isNew ? 'Ocorrência salva com sucesso!' : 'Alterações salvas!'),
             backgroundColor: Colors.green));
         Navigator.of(context).pop(true);
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Erro ao salvar: \${e.toString()}'),
+            content: Text('Erro ao salvar: ${e.toString()}'),
             backgroundColor: Colors.red));
       }
     } finally {
@@ -317,8 +340,7 @@ class _RegistroOcorrenciaAgenteScreenState
                       ],
                       TextFormField(
                         controller: _municipioController,
-                        readOnly:
-                        true,
+                        readOnly: true,
                         decoration: const InputDecoration(
                           labelText: 'Município',
                           border: OutlineInputBorder(),
@@ -352,7 +374,7 @@ class _RegistroOcorrenciaAgenteScreenState
   Widget _buildDenunciaContextCard(Denuncia denuncia) {
     final theme = Theme.of(context);
     String endereco =
-        '\${denuncia.rua ?? ''}, \${denuncia.numero ?? ''} - \${denuncia.bairro ?? ''}';
+        '${denuncia.rua ?? ''}, ${denuncia.numero ?? ''} - ${denuncia.bairro ?? ''}';
 
     return Card(
       elevation: 4,
@@ -380,10 +402,14 @@ class _RegistroOcorrenciaAgenteScreenState
               ),
               const SizedBox(height: 16),
             ],
-            _buildInfoRow(
-                context, Icons.description, 'Descrição', denuncia.descricao ?? 'Nenhuma descrição informada'),
+            _buildInfoRow(context, Icons.description, 'Descrição',
+                denuncia.descricao ?? 'Nenhuma descrição informada'),
             const SizedBox(height: 8),
             _buildInfoRow(context, Icons.location_on, 'Endereço', endereco),
+            const SizedBox(height: 8),
+            _buildInfoRow(context, Icons.home_work, 'Complemento',
+                denuncia.complemento ?? 'Não informado'),
+
           ],
         ),
       ),
@@ -434,8 +460,7 @@ class _RegistroOcorrenciaAgenteScreenState
           key: 'captura',
           header: '4. Captura de Triatomíneos',
           body: _buildCaptureSection(isViewOnly: isViewOnly)),
-      if (_tipoAtividade == TipoAtividade.borrifacao ||
-          _realizarBorrifacaoNoPIT)
+      if (_tiposAtividade.contains(TipoAtividade.borrifacao))
         _FormPanelItem(
             key: 'borrifacao',
             header: '5. Borrifação',
@@ -484,12 +509,23 @@ class _RegistroOcorrenciaAgenteScreenState
     return _FormSection(
       children: [
         _buildFieldLabel(context, 'Tipo de Atividade*'),
-        ...TipoAtividade.values.map((tipo) => RadioListTile<TipoAtividade>(
+        ...TipoAtividade.values.map((tipo) {
+          return CheckboxListTile(
             title: Text(formatEnumName(tipo.name)),
-            value: tipo,
-            groupValue: _tipoAtividade,
-            onChanged:
-            isViewOnly ? null : (v) => setState(() => _tipoAtividade = v))),
+            value: _tiposAtividade.contains(tipo),
+            onChanged: isViewOnly
+                ? null
+                : (bool? selected) {
+              setState(() {
+                if (selected == true) {
+                  _tiposAtividade.add(tipo);
+                } else {
+                  _tiposAtividade.remove(tipo);
+                }
+              });
+            },
+          );
+        }).toList(),
         const SizedBox(height: 16),
         TextFormField(
           controller: _dataAtividadeController,
@@ -502,7 +538,7 @@ class _RegistroOcorrenciaAgenteScreenState
           validator: (v) =>
           (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
         ),
-        if (_tipoAtividade == TipoAtividade.atendimentoPIT) ...[
+        if (_tiposAtividade.contains(TipoAtividade.atendimentoPIT)) ...[
           const SizedBox(height: 16),
           TextFormField(
             controller: _numeroPITController,
@@ -515,7 +551,7 @@ class _RegistroOcorrenciaAgenteScreenState
             ),
             keyboardType: TextInputType.number,
             validator: (v) =>
-            (_tipoAtividade == TipoAtividade.atendimentoPIT &&
+            (_tiposAtividade.contains(TipoAtividade.atendimentoPIT) &&
                 (v == null || v.isEmpty))
                 ? 'Campo obrigatório'
                 : null,
@@ -635,8 +671,8 @@ class _RegistroOcorrenciaAgenteScreenState
                   selected: _numeroAnexo == index,
                   onSelected: isViewOnly
                       ? null
-                      : (bool selected) => setState(
-                          () => _numeroAnexo = selected ? index : null));
+                      : (bool selected) =>
+                      setState(() => _numeroAnexo = selected ? index : null));
             })),
         const Divider(height: 32),
         _buildFieldLabel(context, 'Situação do Imóvel*'),
@@ -644,18 +680,17 @@ class _RegistroOcorrenciaAgenteScreenState
             title: Text(formatEnumName(s.name)),
             value: s,
             groupValue: _situacaoImovel,
-            onChanged: isViewOnly
-                ? null
-                : (v) => setState(() => _situacaoImovel = v))),
+            onChanged:
+            isViewOnly ? null : (v) => setState(() => _situacaoImovel = v))),
         const Divider(height: 32),
         DropdownButtonFormField<String>(
           value: _tipoParede,
           decoration: const InputDecoration(
               labelText: 'Tipo de Parede*', border: OutlineInputBorder()),
-          items:
-          paredes.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-          onChanged:
-          isViewOnly ? null : (v) => setState(() => _tipoParede = v),
+          items: paredes
+              .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+              .toList(),
+          onChanged: isViewOnly ? null : (v) => setState(() => _tipoParede = v),
           validator: (v) => v == null ? 'Campo obrigatório' : null,
         ),
         const SizedBox(height: 16),
@@ -663,8 +698,9 @@ class _RegistroOcorrenciaAgenteScreenState
           value: _tipoTeto,
           decoration: const InputDecoration(
               labelText: 'Tipo de Teto*', border: OutlineInputBorder()),
-          items:
-          tetos.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+          items: tetos
+              .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+              .toList(),
           onChanged: isViewOnly ? null : (v) => setState(() => _tipoTeto = v),
           validator: (v) => v == null ? 'Campo obrigatório' : null,
         ),
@@ -796,8 +832,10 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   Widget _buildImageSection({required bool isViewOnly}) {
-    final allImages =
-    [..._localImagePaths, ..._newlyAddedImages.map((f) => f.path)];
+    final allImages = [
+      ..._localImagePaths,
+      ..._newlyAddedImages.map((f) => f.path)
+    ];
     final canAddMore = allImages.length < 4;
 
     return _FormSection(
@@ -825,8 +863,7 @@ class _RegistroOcorrenciaAgenteScreenState
                 children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child:
-                    SmartImage(imageSource: imagePath, fit: BoxFit.cover),
+                    child: SmartImage(imageSource: imagePath, fit: BoxFit.cover),
                   ),
                   if (!isViewOnly)
                     Positioned(
@@ -891,8 +928,7 @@ class _RegistroOcorrenciaAgenteScreenState
           decoration: const InputDecoration(
               labelText: 'Inseticida*', border: OutlineInputBorder()),
           validator: (v) {
-            if ((_tipoAtividade == TipoAtividade.borrifacao ||
-                _realizarBorrifacaoNoPIT) &&
+            if (_tiposAtividade.contains(TipoAtividade.borrifacao) &&
                 (v == null || v.isEmpty)) {
               return 'Obrigatório para borrifação';
             }
@@ -909,9 +945,8 @@ class _RegistroOcorrenciaAgenteScreenState
               selected: _numCargasController.text == index.toString(),
               onSelected: isViewOnly
                   ? null
-                  : (bool selected) => setState(() =>
-              _numCargasController.text =
-              selected ? index.toString() : '0'),
+                  : (bool selected) => setState(() => _numCargasController
+                  .text = selected ? index.toString() : '0'),
             );
           }),
         ),
@@ -1006,7 +1041,7 @@ class _RegistroOcorrenciaAgenteScreenState
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao selecionar imagem: \$e')),
+        SnackBar(content: Text('Erro ao selecionar imagem: $e')),
       );
     }
   }
@@ -1038,12 +1073,12 @@ class _RegistroOcorrenciaAgenteScreenState
                 p.subAdministrativeArea ?? _municipioController.text;
           });
         }
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Endereço preenchido com a localização.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Endereço preenchido com a localização.')));
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Não foi possível obter a localização: \$e')),
+        SnackBar(content: Text('Não foi possível obter a localização: $e')),
       );
     } finally {
       setState(() => _isGettingLocation = false);

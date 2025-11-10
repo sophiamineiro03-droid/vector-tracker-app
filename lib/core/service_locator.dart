@@ -5,6 +5,7 @@ import 'package:vector_tracker_app/repositories/agente_repository.dart';
 import 'package:vector_tracker_app/repositories/denuncia_repository.dart';
 import 'package:vector_tracker_app/repositories/ocorrencia_repository.dart';
 import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
+import 'package:vector_tracker_app/services/agent_service.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 
 class ServiceLocator {
@@ -45,15 +46,16 @@ class ServiceLocator {
     );
 
     _getIt.registerLazySingleton<AgenteRepository>(
-          () => AgenteRepository(
-        supabase: _getIt<SupabaseClient>(),
-        cacheBox: _getIt<Box>(instanceName: 'denuncias_cache'),
-      ),
+          () => AgenteRepository(_getIt<SupabaseClient>()),
     );
 
     // Serviços principais
     _getIt.registerLazySingleton<DenunciaService>(
           () => DenunciaService(),
+    );
+
+    _getIt.registerLazySingleton<AgentService>(
+          () => AgentService(),
     );
 
     // Registrando o serviço avançado ("Etapa 4")
