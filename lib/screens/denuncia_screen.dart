@@ -6,6 +6,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
+import 'package:vector_tracker_app/models/localidade.dart';
+import 'package:vector_tracker_app/models/municipio.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/util/location_util.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
@@ -24,13 +26,13 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
   XFile? _pickedImage;
   bool _isSaving = false;
   bool _addressFilled = false;
-  String? _selectedLocalidade;
+
+  String? _selectedCidadeId;
+  String? _selectedLocalidadeId;
 
   final _descricaoController = TextEditingController();
   final _ruaController = TextEditingController();
   final _bairroController = TextEditingController();
-  final _cidadeController = TextEditingController();
-  final _estadoController = TextEditingController();
   final _numeroController = TextEditingController();
   final _complementoController = TextEditingController();
 
@@ -41,7 +43,7 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<DenunciaService>().fetchLocalidades();
+      context.read<DenunciaService>().fetchMunicipios();
     });
     if (widget.denuncia != null) {
       _fillFields(widget.denuncia!);
@@ -52,15 +54,17 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     _descricaoController.text = denuncia.descricao ?? '';
     _ruaController.text = denuncia.rua ?? '';
     _bairroController.text = denuncia.bairro ?? '';
-    _selectedLocalidade = denuncia.localidade;
-    _cidadeController.text = denuncia.cidade ?? '';
-    _estadoController.text = denuncia.estado ?? '';
+    _selectedCidadeId = denuncia.cidade;
+    _selectedLocalidadeId = denuncia.localidade_id;
     _numeroController.text = denuncia.numero ?? '';
     _complementoController.text = denuncia.complemento ?? '';
     _latitude = denuncia.latitude;
     _longitude = denuncia.longitude;
     if ((denuncia.rua ?? '').isNotEmpty) {
       _addressFilled = true;
+    }
+    if (_selectedCidadeId != null) {
+      context.read<DenunciaService>().fetchLocalidades(_selectedCidadeId!);
     }
   }
 
@@ -112,16 +116,16 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
         setState(() {
           _ruaController.text = p.street ?? '';
           _bairroController.text = p.subLocality ?? '';
-          _cidadeController.text = p.subAdministrativeArea ?? '';
-          _estadoController.text = p.administrativeArea ?? '';
           _latitude = position.latitude;
           _longitude = position.longitude;
           _addressFilled = true;
-          _selectedLocalidade = null;
+          _selectedCidadeId = null;
+          _selectedLocalidadeId = null;
+          context.read<DenunciaService>().clearLocalidades();
         });
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Endereço preenchido! Por favor, selecione a localidade na lista.'), backgroundColor: Colors.green),
+            const SnackBar(content: Text('Endereço preenchido! Por favor, selecione a cidade e localidade na lista.'), backgroundColor: Colors.green),
           );
         }
       }
@@ -156,9 +160,8 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
         longitude: _longitude,
         rua: _ruaController.text,
         bairro: _bairroController.text,
-        localidade: _selectedLocalidade,
-        cidade: _cidadeController.text,
-        estado: _estadoController.text,
+        cidade: _selectedCidadeId,
+        localidade_id: _selectedLocalidadeId,
         numero: _numeroController.text,
         complemento: _complementoController.text,
         foto_url: _pickedImage?.path,
@@ -183,6 +186,15 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  void _onMunicipioChanged(String? newCidadeId) {
+    if (newCidadeId == null) return;
+    setState(() {
+      _selectedCidadeId = newCidadeId;
+      _selectedLocalidadeId = null; // Limpa a seleção de localidade
+    });
+    context.read<DenunciaService>().fetchLocalidades(newCidadeId);
   }
 
   @override
@@ -313,24 +325,39 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
               Container(
                 padding: const EdgeInsets.all(12), width: double.infinity,
                 decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue[200]!)),
-                child: const Text('Endereço preenchido! Por favor, selecione a localidade na lista.', textAlign: TextAlign.center, style: TextStyle(color: Colors.blue)),
+                child: const Text('Endereço preenchido! Por favor, selecione a cidade e a localidade na lista.', textAlign: TextAlign.center, style: TextStyle(color: Colors.blue)),
               ),
             ],
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              value: _selectedLocalidade,
+              value: _selectedCidadeId,
+              decoration: const InputDecoration(labelText: 'Cidade*', border: OutlineInputBorder()),
+              isExpanded: true,
+              hint: denunciaService.isMunicipiosLoading ? const Text('Carregando cidades...') : const Text('Selecione a cidade'),
+              items: denunciaService.municipios.map((Municipio municipio) {
+                return DropdownMenuItem<String>(
+                  value: municipio.id,
+                  child: Text(municipio.nome),
+                );
+              }).toList(),
+              onChanged: _onMunicipioChanged,
+              validator: (value) => value == null ? 'Campo obrigatório' : null,
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              value: _selectedLocalidadeId,
               decoration: const InputDecoration(labelText: 'Localidade*', border: OutlineInputBorder()),
               isExpanded: true,
               hint: denunciaService.isLocalidadesLoading ? const Text('Carregando...') : const Text('Selecione a localidade'),
-              items: denunciaService.localidades.map((String localidade) {
+              items: denunciaService.localidades.map((Localidade localidade) {
                 return DropdownMenuItem<String>(
-                  value: localidade,
-                  child: Text(localidade),
+                  value: localidade.id,
+                  child: Text(localidade.nome),
                 );
               }).toList(),
-              onChanged: (String? newValue) {
+              onChanged: _selectedCidadeId == null ? null : (String? newValue) {
                 setState(() {
-                  _selectedLocalidade = newValue;
+                  _selectedLocalidadeId = newValue;
                 });
               },
               validator: (value) => value == null ? 'Campo obrigatório' : null,
@@ -350,10 +377,6 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
             TextFormField(controller: _ruaController, decoration: const InputDecoration(labelText: 'Rua', border: OutlineInputBorder())),
             const SizedBox(height: 10),
             TextFormField(controller: _bairroController, decoration: const InputDecoration(labelText: 'Bairro', border: OutlineInputBorder())),
-            const SizedBox(height: 10),
-            TextFormField(controller: _cidadeController, decoration: const InputDecoration(labelText: 'Cidade', border: OutlineInputBorder())),
-            const SizedBox(height: 10),
-            TextFormField(controller: _estadoController, decoration: const InputDecoration(labelText: 'Estado', border: OutlineInputBorder())),
           ],
         ),
       ),

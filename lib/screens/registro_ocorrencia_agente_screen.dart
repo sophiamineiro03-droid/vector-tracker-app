@@ -209,7 +209,7 @@ class _RegistroOcorrenciaAgenteScreenState
 
     _dataAtividadeController.text =
         DateFormat('dd/MM/yyyy').format(DateTime.now());
-    _municipioController.text = den.cidade ?? _municipioController.text;
+    _municipioController.text = den.cidade ?? '';
     _enderecoController.text = den.rua ?? '';
     _numeroController.text = den.numero ?? '';
     _complementoController.text = den.complemento ?? '';

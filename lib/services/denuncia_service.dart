@@ -5,23 +5,30 @@ import 'package:hive/hive.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:vector_tracker_app/core/app_logger.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
+import 'package:vector_tracker_app/models/localidade.dart';
+import 'package:vector_tracker_app/models/municipio.dart';
 
 class DenunciaService with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
   final Box _denunciasCache = Hive.box('denuncias_cache');
   final Box _pendingDenunciasBox = Hive.box('pending_denuncias');
-  final Box _localidadesCache = Hive.box('localidades_cache');
-  
+
   StreamSubscription<ConnectivityResult>? _connectivitySubscription;
 
   List<Map<String, dynamic>> _items = [];
   List<Map<String, dynamic>> get items => _items;
 
-  List<String> _localidades = [];
-  List<String> get localidades => _localidades;
+  List<Municipio> _municipios = [];
+  List<Municipio> get municipios => _municipios;
+
+  List<Localidade> _localidades = [];
+  List<Localidade> get localidades => _localidades;
 
   bool _isLoading = false;
   bool get isLoading => _isLoading;
+
+  bool _isMunicipiosLoading = false;
+  bool get isMunicipiosLoading => _isMunicipiosLoading;
 
   bool _isLocalidadesLoading = false;
   bool get isLocalidadesLoading => _isLocalidadesLoading;
@@ -66,8 +73,6 @@ class DenunciaService with ChangeNotifier {
         final denunciaMap = Map<String, dynamic>.from(denunciaData as Map);
         final id = denunciaMap['id'];
 
-        // Lógica de upload de foto, se houver
-
         await _supabase.from('denuncias').upsert(denunciaMap);
         await _pendingDenunciasBox.delete(id);
         AppLogger.sync('Denúncia $id sincronizada com sucesso.');
@@ -78,7 +83,7 @@ class DenunciaService with ChangeNotifier {
     }
 
     _isSyncing = false;
-    await fetchItems(); // Atualiza a lista após a sincronização
+    await fetchItems();
   }
 
   Future<void> fetchItems() async {
@@ -86,7 +91,6 @@ class DenunciaService with ChangeNotifier {
     notifyListeners();
 
     try {
-      // Carrega do cache local primeiro
       final List<Map<String, dynamic>> allItems = [];
       final cached = _denunciasCache.values.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       allItems.addAll(cached);
@@ -100,7 +104,6 @@ class DenunciaService with ChangeNotifier {
       _items = uniqueItems.values.toList();
       notifyListeners();
 
-      // Se online, busca do Supabase e atualiza o cache
       final connectivityResult = await Connectivity().checkConnectivity();
       final isOnline = connectivityResult == ConnectivityResult.mobile || 
                       connectivityResult == ConnectivityResult.wifi;
@@ -132,52 +135,51 @@ class DenunciaService with ChangeNotifier {
 
   Future<void> saveDenuncia(Denuncia denuncia) async {
     final data = denuncia.toMap();
-    data['is_pending'] = true;
     data['status'] = 'pendente_envio';
 
     await _pendingDenunciasBox.put(denuncia.id, data);
-    await fetchItems(); // Atualiza a UI imediatamente
-    syncPendingDenuncias(); // Tenta sincronizar
+    await fetchItems();
+    syncPendingDenuncias();
   }
 
-  Future<void> fetchLocalidades() async {
-    if (_isLocalidadesLoading) return;
+  Future<void> fetchMunicipios() async {
+    _isMunicipiosLoading = true;
+    notifyListeners();
+    try {
+      final response = await _supabase.from('municipios').select('id, nome');
+      _municipios = (response as List).map((map) => Municipio.fromMap(map)).toList();
+    } catch (e, s) {
+      AppLogger.error('Erro ao buscar municípios', e, s);
+    } finally {
+      _isMunicipiosLoading = false;
+      notifyListeners();
+    }
+  }
 
-    AppLogger.info('Buscando localidades...');
+  Future<void> fetchLocalidades(String municipioId) async {
     _isLocalidadesLoading = true;
+    _localidades = []; // Limpa a lista antes de buscar novas
     notifyListeners();
 
     try {
-      if (_localidadesCache.isNotEmpty) {
-        _localidades = _localidadesCache.values.map((e) => (e as Map)['nome'] as String).toList();
-        notifyListeners();
-      }
-
-      final connectivityResult = await (Connectivity().checkConnectivity());
-      final isOnline = connectivityResult == ConnectivityResult.mobile ||
-                      connectivityResult == ConnectivityResult.wifi;
-
-      if (isOnline) {
-        final response = await _supabase.from('localidades').select('nome');
-        final localidadesMap = List<Map<String, dynamic>>.from(response);
-        
-        await _localidadesCache.clear();
-        final newLocalidades = <String>{};
-
-        for (var loc in localidadesMap) {
-          await _localidadesCache.put(loc['nome'], loc);
-          newLocalidades.add(loc['nome'] as String);
-        }
-        _localidades = newLocalidades.toList();
-      }
+      final response = await _supabase
+          .from('localidades')
+          .select('id, nome')
+          .eq('municipio_id', municipioId);
+      _localidades = (response as List).map((map) => Localidade.fromMap(map)).toList();
     } catch (e, s) {
-      AppLogger.error('Erro ao buscar localidades', e, s);
+      AppLogger.error('Erro ao buscar localidades para o município $municipioId', e, s);
     } finally {
       _isLocalidadesLoading = false;
       notifyListeners();
     }
   }
   
+  void clearLocalidades(){
+    _localidades = [];
+    notifyListeners();
+  }
+
   void updateItemInList(Map<String, dynamic> updatedItem) {
      final index = _items.indexWhere((item) => item['id'] == updatedItem['id']);
     if (index != -1) {

@@ -8,11 +8,11 @@ class Denuncia {
   final double? longitude;
   final String? rua;
   final String? bairro;
-  final String? localidade;
   final String? cidade;
+  final String? localidade_id;
   final String? estado;
   final String? numero;
-  final String? complemento; // <<< ADICIONADO
+  final String? complemento;
   final String? foto_url;
   final DateTime? createdAt;
   final String? status;
@@ -24,11 +24,11 @@ class Denuncia {
     this.longitude,
     this.rua,
     this.bairro,
-    this.localidade,
     this.cidade,
+    this.localidade_id,
     this.estado,
     this.numero,
-    this.complemento, // <<< ADICIONADO
+    this.complemento,
     this.foto_url,
     this.createdAt,
     this.status,
@@ -41,11 +41,11 @@ class Denuncia {
     double? longitude,
     String? rua,
     String? bairro,
-    String? localidade,
     String? cidade,
+    String? localidade_id,
     String? estado,
     String? numero,
-    String? complemento, // <<< ADICIONADO
+    String? complemento,
     String? foto_url,
     DateTime? createdAt,
     String? status,
@@ -57,11 +57,11 @@ class Denuncia {
       longitude: longitude ?? this.longitude,
       rua: rua ?? this.rua,
       bairro: bairro ?? this.bairro,
-      localidade: localidade ?? this.localidade,
       cidade: cidade ?? this.cidade,
+      localidade_id: localidade_id ?? this.localidade_id,
       estado: estado ?? this.estado,
       numero: numero ?? this.numero,
-      complemento: complemento ?? this.complemento, // <<< ADICIONADO
+      complemento: complemento ?? this.complemento,
       foto_url: foto_url ?? this.foto_url,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,
@@ -72,17 +72,17 @@ class Denuncia {
     return {
       'id': id,
       'descricao': descricao,
-      'gps_latitude': latitude,
-      'gps_longitude': longitude,
+      'latitude': latitude,
+      'longitude': longitude,
       'rua': rua,
       'bairro': bairro,
-      'localidade': localidade,
       'cidade': cidade,
+      'localidade_id': localidade_id,
       'estado': estado,
-      'numero_casa': numero,
-      'complemento': complemento, // <<< ADICIONADO
+      'numero': numero,
+      'complemento': complemento,
       'foto_url': foto_url,
-      'criada_em': createdAt?.toIso8601String(),
+      'created_at': createdAt?.toIso8601String(),
       'status': status,
     };
   }
@@ -91,17 +91,17 @@ class Denuncia {
     return Denuncia(
       id: map['id'] ?? '',
       descricao: map['descricao'],
-      latitude: map['gps_latitude']?.toDouble(),
-      longitude: map['gps_longitude']?.toDouble(),
+      latitude: map['latitude']?.toDouble(),
+      longitude: map['longitude']?.toDouble(),
       rua: map['rua'],
       bairro: map['bairro'],
-      localidade: map['localidade'],
       cidade: map['cidade'],
+      localidade_id: map['localidade_id'],
       estado: map['estado'],
-      numero: map['numero_casa'],
-      complemento: map['complemento'], // <<< ADICIONADO
+      numero: map['numero'],
+      complemento: map['complemento'],
       foto_url: map['foto_url'],
-      createdAt: map['criada_em'] != null ? DateTime.parse(map['criada_em']) : null,
+      createdAt: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
       status: map['status'],
     );
   }
