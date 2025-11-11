@@ -78,7 +78,6 @@ class _RegistroOcorrenciaAgenteScreenState
   double? _currentLat;
   double? _currentLng;
 
-  // Passo 1: Novas Variáveis de Estado
   bool _isLoading = true;
   List<LocalidadeSimples> _localidadesAgente = [];
   String? _selectedLocalidadeId;
@@ -111,7 +110,6 @@ class _RegistroOcorrenciaAgenteScreenState
   final Map<String, bool> _vestigiosIntra = {'Ovos': false, 'Nenhum': true};
   final Map<String, bool> _vestigiosPeri = {'Ovos': false, 'Nenhum': true};
 
-  // Passo 2: Lógica de Inicialização Refatorada
   @override
   void initState() {
     super.initState();
@@ -121,7 +119,6 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   Future<void> _initializeFormData() async {
-    // Garante que o widget ainda está na árvore
     if (!mounted) return;
 
     final agent = await context.read<AgenteRepository>().getCurrentAgent();
@@ -140,7 +137,6 @@ class _RegistroOcorrenciaAgenteScreenState
     } else {
       _dataAtividadeController.text =
           DateFormat('dd/MM/yyyy').format(DateTime.now());
-      // Pré-seleciona a primeira localidade, se houver
       if (_localidadesAgente.isNotEmpty) {
         _onLocalidadeChanged(_localidadesAgente.first.id);
       }
@@ -153,20 +149,15 @@ class _RegistroOcorrenciaAgenteScreenState
     }
   }
 
-  // Passo 4: Função de Apoio
   void _onLocalidadeChanged(String? newId) {
     if (newId == null) return;
-    final localidade = _localidadesAgente.firstWhere((loc) => loc.id == newId,
-        orElse: () =>
-            LocalidadeSimples(id: '', nome: '', codigo: '', categoria: ''));
     setState(() {
       _selectedLocalidadeId = newId;
-      _codigoLocalidadeController.text = localidade.codigo;
-      _categoriaLocalidadeController.text = localidade.categoria;
+      _codigoLocalidadeController.clear();
+      _categoriaLocalidadeController.clear();
     });
   }
 
-  // Passo 6: Ajustar Funções de Preenchimento
   void _populateFromOcorrencia(Ocorrencia oco) {
     if (oco.localImagePaths != null) {
       _localImagePaths.addAll(oco.localImagePaths!);
@@ -180,8 +171,10 @@ class _RegistroOcorrenciaAgenteScreenState
     _municipioController.text = oco.municipio_id_ui ?? '';
 
     if (oco.localidade_id != null) {
-       _onLocalidadeChanged(oco.localidade_id);
+      _selectedLocalidadeId = oco.localidade_id;
     }
+    _codigoLocalidadeController.text = oco.codigo_localidade ?? '';
+    _categoriaLocalidadeController.text = oco.categoria_localidade ?? '';
 
     _enderecoController.text = oco.endereco ?? '';
     _numeroController.text = oco.numero ?? '';
@@ -224,7 +217,6 @@ class _RegistroOcorrenciaAgenteScreenState
     _currentLng = den.longitude;
   }
 
-  // Passo 8: Limpeza Final
   @override
   void dispose() {
     _dataAtividadeController.dispose();
@@ -245,7 +237,6 @@ class _RegistroOcorrenciaAgenteScreenState
     super.dispose();
   }
 
-  // Passo 7: Corrigir Salvamento
   Future<void> _saveForm() async {
     if (_isViewMode) return;
 
@@ -336,7 +327,6 @@ class _RegistroOcorrenciaAgenteScreenState
     }
   }
 
-  // Passo 3: Lógica de Carregamento na UI
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -591,7 +581,6 @@ class _RegistroOcorrenciaAgenteScreenState
     );
   }
 
-  // Passo 5: Atualizar a Interface
   Widget _buildAddressSection({required bool isViewOnly}) {
     return _FormSection(
       children: [
@@ -637,20 +626,16 @@ class _RegistroOcorrenciaAgenteScreenState
             ),
             TextFormField(
                 controller: _codigoLocalidadeController,
-                readOnly: true,
+                readOnly: isViewOnly,
                 decoration: const InputDecoration(
                     labelText: 'Código da Localidade',
-                    border: OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Colors.black12)),
+                    border: OutlineInputBorder())),
             TextFormField(
                 controller: _categoriaLocalidadeController,
-                readOnly: true,
+                readOnly: isViewOnly,
                 decoration: const InputDecoration(
                     labelText: 'Categoria',
-                    border: OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Colors.black12)),
+                    border: OutlineInputBorder())),
           ],
         ),
         const SizedBox(height: 16),
