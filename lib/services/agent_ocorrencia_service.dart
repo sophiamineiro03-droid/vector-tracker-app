@@ -1,27 +1,19 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
-import 'package:vector_tracker_app/models/ocorrencia_enums.dart'; 
-import '../models/ocorrencia.dart';
-import '../repositories/ocorrencia_repository.dart';
-import '../repositories/agente_repository.dart';
-import '../core/app_logger.dart';
+import 'package:vector_tracker_app/models/ocorrencia.dart';
+import 'package:vector_tracker_app/repositories/agente_repository.dart';
+import 'package:vector_tracker_app/repositories/ocorrencia_repository.dart';
 
-// Classe auxiliar que movi do final do arquivo para o topo para clareza
-class SyncResult {
-  final bool success;
-  final String message;
-  SyncResult({required this.success, required this.message});
-}
-
-/// Serviço de ocorrências específico para agentes (VERSÃO CORRIGIDA)
-///
-/// ETAPA 4: Implementa offline-first com status_sincronizacao e RLS.
-class AgentOcorrenciaService with ChangeNotifier {
-  final OcorrenciaRepository _ocorrenciaRepository;
+class AgentOcorrenciaService extends ChangeNotifier {
   final AgenteRepository _agenteRepository;
-  final _uuid = const Uuid();
+  final OcorrenciaRepository _ocorrenciaRepository;
+  final SupabaseClient _supabase = GetIt.I.get<SupabaseClient>();
+
+  AgentOcorrenciaService(this._agenteRepository, this._ocorrenciaRepository);
 
   List<Ocorrencia> _ocorrencias = [];
   List<Ocorrencia> get ocorrencias => _ocorrencias;
@@ -32,197 +24,124 @@ class AgentOcorrenciaService with ChangeNotifier {
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
 
-  int get pendingSyncCount =>
-      _ocorrencias.where((o) => !o.sincronizado).length;
-
-  AgentOcorrenciaService({
-    required OcorrenciaRepository ocorrenciaRepository,
-    required AgenteRepository agenteRepository,
-  })  : _ocorrenciaRepository = ocorrenciaRepository,
-        _agenteRepository = agenteRepository;
-
-  /// Busca ocorrências do agente com estratégia offline-first.
-  Future<void> fetchOcorrencias({bool showLoading = true}) async {
+  int get pendingSyncCount {
     try {
-      if (showLoading) _setLoading(true);
-      AppLogger.info('Buscando ocorrências do agente');
-
-      // 1. Carrega do cache para uma resposta rápida
-      final cachedOcorrencias =
-      await _ocorrenciaRepository.getOcorrenciasFromCache();
-      _ocorrencias = cachedOcorrencias;
-      notifyListeners();
-      AppLogger.info(
-          '${cachedOcorrencias.length} ocorrências carregadas do cache');
-
-      // 2. Mescla com itens pendentes que ainda não foram para o cache
-      final pendingOcorrencias =
-      await _ocorrenciaRepository.getFromPendingBox();
-      _mergeLists(pendingOcorrencias);
-      notifyListeners();
-
-      // 3. Tenta buscar da nuvem para atualizar
-      final connectivityResult = await Connectivity().checkConnectivity();
-      final isOnline = connectivityResult == ConnectivityResult.mobile ||
-          connectivityResult == ConnectivityResult.wifi;
-
-      if (isOnline) {
-        AppLogger.info("Buscando dados frescos da nuvem...");
-        final onlineOcorrencias =
-        await _ocorrenciaRepository.fetchAllOcorrenciasFromSupabase();
-        _ocorrencias = onlineOcorrencias; // A lista principal agora é a da nuvem
-        _mergeLists(
-            pendingOcorrencias); // Re-mescla pendentes com a lista fresca
-        notifyListeners();
-        AppLogger.info('✓ Ocorrências sincronizadas com a nuvem.');
-      }
-    } catch (e, stackTrace) {
-      AppLogger.error('Erro crítico ao buscar ocorrências', e, stackTrace);
-    } finally {
-      if (showLoading) _setLoading(false);
+      final box = GetIt.I.get<Box>(instanceName: 'pending_ocorrencias');
+      return box.length;
+    } catch (e) {
+      return 0;
     }
   }
 
-  /// Salva ocorrência com estratégia offline-first.
-  Future<Ocorrencia> saveOcorrencia(Ocorrencia ocorrencia) async {
+  Future<void> fetchOcorrencias() async {
+    _setLoading(true);
     try {
-      AppLogger.info(
-          'Salvando ocorrência: ${ocorrencia.id}');
-      final connectivityResult = await Connectivity().checkConnectivity();
-      final isOnline = connectivityResult == ConnectivityResult.mobile ||
-          connectivityResult == ConnectivityResult.wifi;
+      _ocorrencias = await _ocorrenciaRepository.getOcorrenciasFromCache();
+      notifyListeners();
+      await forceRefresh();
+    } catch (e) {
+      print('Erro ao buscar ocorrências: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
 
+  Future<void> forceRefresh() async {
+    _setLoading(true);
+    try {
+      _ocorrencias = await _ocorrenciaRepository.fetchAllOcorrenciasFromSupabase();
+    } catch (e) {
+      print('Erro ao forçar atualização: $e');
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> saveOcorrencia(Ocorrencia ocorrencia) async {
+    _setLoading(true);
+    try {
       final agente = await _agenteRepository.getCurrentAgent();
+      if (agente == null) throw Exception('Agente não identificado.');
 
-      Ocorrencia ocorrenciaToSave = ocorrencia.id.isEmpty
-          ? ocorrencia.copyWith(
-              id: _uuid.v4(), // Garante um ID local
-              agente_id: agente?.id,
-            )
-          : ocorrencia;
+      var ocorrenciaToSave = ocorrencia.copyWith(agente_id: agente.id);
 
-      if (isOnline) {
-        try {
-          // Tenta salvar diretamente na nuvem
-          final syncedOcorrencia =
-          await _ocorrenciaRepository.insertInSupabase(ocorrenciaToSave);
-          _updateLocalList(syncedOcorrencia.copyWith(sincronizado: true));
-          return syncedOcorrencia;
-        } catch (e) {
-          AppLogger.warning('Falha ao salvar online, salvando localmente: $e');
-          await _ocorrenciaRepository.saveToPendingBox(ocorrenciaToSave);
-          _updateLocalList(ocorrenciaToSave.copyWith(sincronizado: false));
-          return ocorrenciaToSave;
+      final List<String> novasUrls = [];
+      if (ocorrencia.localImagePaths != null) {
+        for (var imagePath in ocorrencia.localImagePaths!) {
+          if (!imagePath.startsWith('http')) {
+            final imageUrl = await _uploadImage(imagePath);
+            if (imageUrl != null) novasUrls.add(imageUrl);
+          }
         }
-      } else {
-        // Salva localmente para sincronização posterior
-        AppLogger.info('Offline. Ocorrência salva para sincronização.');
-        await _ocorrenciaRepository.saveToPendingBox(ocorrenciaToSave);
-        _updateLocalList(ocorrenciaToSave.copyWith(sincronizado: false));
-        return ocorrenciaToSave;
       }
-    } catch (e, stackTrace) {
-      AppLogger.error('Erro ao salvar ocorrência', e, stackTrace);
-      rethrow;
+
+      final todasAsUrls = [...?ocorrencia.fotos_urls, ...novasUrls];
+      ocorrenciaToSave = ocorrenciaToSave.copyWith(fotos_urls: todasAsUrls, sincronizado: true);
+
+      await _ocorrenciaRepository.insertInSupabase(ocorrenciaToSave);
+
+    } catch (e) {
+      print('Falha ao salvar online, salvando localmente: $e');
+      await _ocorrenciaRepository.saveToPendingBox(ocorrencia.copyWith(sincronizado: false));
+    } finally {
+      await fetchOcorrencias();
+      _setLoading(false);
     }
   }
 
-  /// Sincroniza ocorrências pendentes.
-  Future<SyncResult> syncPendingOcorrencias() async {
-    if (_isSyncing) {
-      return SyncResult(success: false, message: 'Sincronização já em andamento');
-    }
-    _setSyncing(true);
+  Future<String?> _uploadImage(String filePath) async {
+    final file = File(filePath);
+    final fileName = '${const Uuid().v4()}.${filePath.split('.').last}';
 
     try {
-      AppLogger.sync('Iniciando sincronização de ocorrências pendentes');
-      final connectivityResult = await Connectivity().checkConnectivity();
-      if (connectivityResult == ConnectivityResult.none) {
-        return SyncResult(success: false, message: 'Sem conexão com a internet');
-      }
+      await _supabase.storage.from('fotos-ocorrencias').upload(fileName, file);
+      return _supabase.storage.from('fotos-ocorrencias').getPublicUrl(fileName);
+    } catch (e) {
+      print('Erro no upload da imagem: $e');
+      return null;
+    }
+  }
 
-      final pendingList = await _ocorrenciaRepository.getFromPendingBox();
-      if (pendingList.isEmpty) {
-        return SyncResult(success: true, message: 'Nenhuma pendência encontrada');
-      }
+  Future<String> syncPendingOcorrencias() async {
+    if (_isSyncing) return "Sincronização já em andamento.";
 
-      int successCount = 0;
-      int errorCount = 0;
-
-      for (var ocorrencia in pendingList) {
-        try {
-          // Tenta sincronizar com o Supabase
-          final synced = await _ocorrenciaRepository.insertInSupabase(ocorrencia);
-
-          // Remove da fila pendente
-          await _ocorrenciaRepository.deleteFromPendingBox(ocorrencia.id);
-
-          // Atualiza na lista local
-          _updateLocalList(synced.copyWith(sincronizado: true));
-          successCount++;
-          AppLogger.sync('✓ Ocorrência ${ocorrencia.id} sincronizada');
-        } catch (e, stackTrace) {
-          AppLogger.error(
-              'Erro ao sincronizar ocorrência ${ocorrencia.id}', e, stackTrace);
-          errorCount++;
-        }
-      }
-
-      final message = successCount > 0
-          ? 'Sincronizadas $successCount ocorrências${errorCount > 0 ? ', $errorCount falharam' : ''}'
-          : 'Falha ao sincronizar todas as ocorrências';
-
-      AppLogger.sync('Sincronização concluída: $message');
-      return SyncResult(success: successCount > 0, message: message);
-    } catch (e, stackTrace) {
-      AppLogger.error('Erro durante sincronização', e, stackTrace);
-      return SyncResult(success: false, message: 'Erro na sincronização: $e');
-    } finally {
+    _setSyncing(true);
+    final pending = await _ocorrenciaRepository.getFromPendingBox();
+    if (pending.isEmpty) {
       _setSyncing(false);
+      return "Nenhuma ocorrência pendente para sincronizar.";
     }
-  }
 
-  /// Mescla uma lista de ocorrências com a lista principal em memória.
-  void _mergeLists(List<Ocorrencia> toMerge) {
-    final tempMap = {for (var o in _ocorrencias) o.id: o};
-    for (var o in toMerge) {
-      tempMap[o.id] = o;
+    int successCount = 0;
+    for (var ocorrencia in pending) {
+      try {
+        await saveOcorrencia(ocorrencia);
+        await _ocorrenciaRepository.deleteFromPendingBox(ocorrencia.id);
+        successCount++;
+      } catch (e) {
+        print('Erro ao sincronizar ocorrência ${ocorrencia.id}: $e');
+      }
     }
-    _ocorrencias = tempMap.values.toList();
-    _ocorrencias.sort((a, b) => (b.data_atividade ?? DateTime(0))
-        .compareTo(a.data_atividade ?? DateTime(0)));
-  }
+    
+    _setSyncing(false);
+    await fetchOcorrencias();
 
-  /// Adiciona ou atualiza uma única ocorrência na lista em memória.
-  void _updateLocalList(Ocorrencia ocorrencia) {
-    final index = _ocorrencias.indexWhere((o) => o.id == ocorrencia.id);
-    if (index != -1) {
-      _ocorrencias[index] = ocorrencia;
+    if (successCount == pending.length) {
+      return "Todas as ${pending.length} ocorrências pendentes foram sincronizadas com sucesso!";
     } else {
-      _ocorrencias.insert(0, ocorrencia);
+      return "Sincronização concluída. $successCount de ${pending.length} ocorrências foram sincronizadas.";
     }
-    _ocorrencias.sort((a, b) => (b.data_atividade ?? DateTime(0))
-        .compareTo(a.data_atividade ?? DateTime(0)));
+  }
+
+  void _setLoading(bool value) {
+    if (_isLoading == value) return;
+    _isLoading = value;
     notifyListeners();
   }
 
-  void _setLoading(bool loading) {
-    if (_isLoading != loading) {
-      _isLoading = loading;
-      notifyListeners();
-    }
-  }
-
-  void _setSyncing(bool syncing) {
-    if (_isSyncing != syncing) {
-      _isSyncing = syncing;
-      notifyListeners();
-    }
-  }
-
-  /// Força a atualização dos dados da nuvem.
-  Future<void> forceRefresh() async {
-    AppLogger.info('Force refresh de ocorrências solicitado');
-    await fetchOcorrencias(showLoading: true);
+  void _setSyncing(bool value) {
+    if (_isSyncing == value) return;
+    _isSyncing = value;
+    notifyListeners();
   }
 }

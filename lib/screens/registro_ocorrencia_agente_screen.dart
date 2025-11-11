@@ -9,10 +9,11 @@ import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:vector_tracker_app/models/agente.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
+import 'package:vector_tracker_app/models/localidade_simples.dart';
 import 'package:vector_tracker_app/models/ocorrencia.dart';
 import 'package:vector_tracker_app/models/ocorrencia_enums.dart';
-import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
 import 'package:vector_tracker_app/repositories/agente_repository.dart';
+import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
 import 'package:vector_tracker_app/util/location_util.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 import 'package:vector_tracker_app/widgets/smart_image.dart';
@@ -77,12 +78,16 @@ class _RegistroOcorrenciaAgenteScreenState
   double? _currentLat;
   double? _currentLng;
 
+  // Passo 1: Novas Variáveis de Estado
+  bool _isLoading = true;
+  List<LocalidadeSimples> _localidadesAgente = [];
+  String? _selectedLocalidadeId;
+
   final _dataAtividadeController = TextEditingController();
   final _numeroPITController = TextEditingController();
   final _municipioController = TextEditingController();
   final _codigoLocalidadeController = TextEditingController();
   final _categoriaLocalidadeController = TextEditingController();
-  final _localidadeController = TextEditingController();
   final _enderecoController = TextEditingController();
   final _numeroController = TextEditingController();
   final _complementoController = TextEditingController();
@@ -95,7 +100,6 @@ class _RegistroOcorrenciaAgenteScreenState
   final _agenteController = TextEditingController();
 
   final Set<TipoAtividade> _tiposAtividade = {TipoAtividade.pesquisa};
-  bool _realizarBorrifacaoNoPIT = false;
   SituacaoImovel? _situacaoImovel;
   Pendencia? _pendenciaPesquisa = Pendencia.semPendencias;
   Pendencia? _pendenciaBorrifacao = Pendencia.semPendencias;
@@ -107,25 +111,27 @@ class _RegistroOcorrenciaAgenteScreenState
   final Map<String, bool> _vestigiosIntra = {'Ovos': false, 'Nenhum': true};
   final Map<String, bool> _vestigiosPeri = {'Ovos': false, 'Nenhum': true};
 
+  // Passo 2: Lógica de Inicialização Refatorada
   @override
   void initState() {
     super.initState();
     _isNew = widget.ocorrencia == null;
     _isViewMode = widget.isViewOnly;
+    _initializeFormData();
+  }
 
-    context.read<AgenteRepository>().getCurrentAgent().then((agent) {
-      if (mounted && agent != null) {
-        setState(() {
-          _agenteController.text = agent.nome;
-          _municipioController.text = agent.municipioNome ?? '';
-          // Se é um registro novo (sem ser de uma denúncia) e o agente tem localidades
-          if (_isNew && widget.denunciaOrigem == null && agent.localidades.isNotEmpty) {
-            // Preenche o campo com a primeira localidade da lista do agente
-            _localidadeController.text = agent.localidades.first;
-          }
-        });
-      }
-    });
+  Future<void> _initializeFormData() async {
+    // Garante que o widget ainda está na árvore
+    if (!mounted) return;
+
+    final agent = await context.read<AgenteRepository>().getCurrentAgent();
+    if (agent != null && mounted) {
+      setState(() {
+        _agenteController.text = agent.nome;
+        _municipioController.text = agent.municipioNome ?? '';
+        _localidadesAgente = agent.localidades;
+      });
+    }
 
     if (widget.ocorrencia != null) {
       _populateFromOcorrencia(widget.ocorrencia!);
@@ -134,9 +140,33 @@ class _RegistroOcorrenciaAgenteScreenState
     } else {
       _dataAtividadeController.text =
           DateFormat('dd/MM/yyyy').format(DateTime.now());
+      // Pré-seleciona a primeira localidade, se houver
+      if (_localidadesAgente.isNotEmpty) {
+        _onLocalidadeChanged(_localidadesAgente.first.id);
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
+  // Passo 4: Função de Apoio
+  void _onLocalidadeChanged(String? newId) {
+    if (newId == null) return;
+    final localidade = _localidadesAgente.firstWhere((loc) => loc.id == newId,
+        orElse: () =>
+            LocalidadeSimples(id: '', nome: '', codigo: '', categoria: ''));
+    setState(() {
+      _selectedLocalidadeId = newId;
+      _codigoLocalidadeController.text = localidade.codigo;
+      _categoriaLocalidadeController.text = localidade.categoria;
+    });
+  }
+
+  // Passo 6: Ajustar Funções de Preenchimento
   void _populateFromOcorrencia(Ocorrencia oco) {
     if (oco.localImagePaths != null) {
       _localImagePaths.addAll(oco.localImagePaths!);
@@ -148,9 +178,11 @@ class _RegistroOcorrenciaAgenteScreenState
     _currentLng = oco.longitude;
     _numeroPITController.text = oco.numero_pit ?? '';
     _municipioController.text = oco.municipio_id_ui ?? '';
-    _codigoLocalidadeController.text = oco.codigo_localidade ?? '';
-    _categoriaLocalidadeController.text = oco.categoria_localidade ?? '';
-    _localidadeController.text = oco.localidade_ui ?? '';
+
+    if (oco.localidade_id != null) {
+       _onLocalidadeChanged(oco.localidade_id);
+    }
+
     _enderecoController.text = oco.endereco ?? '';
     _numeroController.text = oco.numero ?? '';
     _complementoController.text = oco.complemento ?? '';
@@ -163,14 +195,12 @@ class _RegistroOcorrenciaAgenteScreenState
     _numCargasController.text = oco.numero_cargas?.toString() ?? '0';
     _codigoEtiquetaController.text = oco.codigo_etiqueta ?? '';
 
-    setState(() {
-      _tiposAtividade.clear();
-      if (oco.tipo_atividade != null) {
-        for (var tipo in oco.tipo_atividade!) {
-          _tiposAtividade.add(tipo);
-        }
+    _tiposAtividade.clear();
+    if (oco.tipo_atividade != null) {
+      for (var tipo in oco.tipo_atividade!) {
+        _tiposAtividade.add(tipo);
       }
-    });
+    }
 
     _situacaoImovel = oco.situacao_imovel;
     _pendenciaPesquisa = oco.pendencia_pesquisa;
@@ -182,14 +212,11 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   void _populateFromDenuncia(Denuncia den) {
-    setState(() {
-      _tiposAtividade.clear();
-    });
+    _tiposAtividade.clear();
 
     _dataAtividadeController.text =
         DateFormat('dd/MM/yyyy').format(DateTime.now());
     _municipioController.text = den.cidade ?? _municipioController.text;
-    _localidadeController.text = den.localidade ?? '';
     _enderecoController.text = den.rua ?? '';
     _numeroController.text = den.numero ?? '';
     _complementoController.text = den.complemento ?? '';
@@ -197,6 +224,7 @@ class _RegistroOcorrenciaAgenteScreenState
     _currentLng = den.longitude;
   }
 
+  // Passo 8: Limpeza Final
   @override
   void dispose() {
     _dataAtividadeController.dispose();
@@ -204,7 +232,6 @@ class _RegistroOcorrenciaAgenteScreenState
     _municipioController.dispose();
     _codigoLocalidadeController.dispose();
     _categoriaLocalidadeController.dispose();
-    _localidadeController.dispose();
     _enderecoController.dispose();
     _numeroController.dispose();
     _complementoController.dispose();
@@ -218,6 +245,7 @@ class _RegistroOcorrenciaAgenteScreenState
     super.dispose();
   }
 
+  // Passo 7: Corrigir Salvamento
   Future<void> _saveForm() async {
     if (_isViewMode) return;
 
@@ -238,10 +266,10 @@ class _RegistroOcorrenciaAgenteScreenState
             DateTime.now();
 
     final ocorrenciaToSave = Ocorrencia(
-      id: widget.ocorrencia?.id ?? Uuid().v4(),
+      id: widget.ocorrencia?.id ?? const Uuid().v4(),
       agente_id: context.read<AgenteRepository>().getCurrentAgent().toString(),
       denuncia_id: widget.denunciaOrigem?.id,
-      localidade_id: widget.ocorrencia?.localidade_id,
+      localidade_id: _selectedLocalidadeId,
       tipo_atividade: _tiposAtividade.toList(),
       data_atividade: dataAtividade,
       numero_pit: _numeroPITController.text,
@@ -261,17 +289,17 @@ class _RegistroOcorrenciaAgenteScreenState
       vestigios_intradomicilio: _vestigiosIntra['Nenhum']!
           ? 'Nenhum'
           : _vestigiosIntra.keys
-          .where((k) => k != 'Nenhum' && _vestigiosIntra[k]!)
-          .join(', '),
+              .where((k) => k != 'Nenhum' && _vestigiosIntra[k]!)
+              .join(', '),
       barbeiros_intradomicilio:
-      int.tryParse(_numBarbeirosIntraController.text) ?? 0,
+          int.tryParse(_numBarbeirosIntraController.text) ?? 0,
       vestigios_peridomicilio: _vestigiosPeri['Nenhum']!
           ? 'Nenhum'
           : _vestigiosPeri.keys
-          .where((k) => k != 'Nenhum' && _vestigiosPeri[k]!)
-          .join(', '),
+              .where((k) => k != 'Nenhum' && _vestigiosPeri[k]!)
+              .join(', '),
       barbeiros_peridomicilio:
-      int.tryParse(_numBarbeirosPeriController.text) ?? 0,
+          int.tryParse(_numBarbeirosPeriController.text) ?? 0,
       inseticida: _inseticidaController.text,
       numero_cargas: int.tryParse(_numCargasController.text) ?? 0,
       codigo_etiqueta: _codigoEtiquetaController.text,
@@ -284,7 +312,6 @@ class _RegistroOcorrenciaAgenteScreenState
       ],
       sincronizado: false,
       municipio_id_ui: _municipioController.text,
-      localidade_ui: _localidadeController.text,
       setor_id_ui: widget.ocorrencia?.setor_id_ui,
     );
 
@@ -309,64 +336,68 @@ class _RegistroOcorrenciaAgenteScreenState
     }
   }
 
+  // Passo 3: Lógica de Carregamento na UI
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final titleStyle =
-    theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold);
+        theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold);
 
     return Scaffold(
       appBar: GradientAppBar(
         title: widget.denunciaOrigem != null
             ? 'Atender Denúncia'
             : (_isNew
-            ? 'Novo Registro Proativo'
-            : (_isViewMode ? 'Detalhes da Visita' : 'Editar Visita')),
+                ? 'Novo Registro Proativo'
+                : (_isViewMode ? 'Detalhes da Visita' : 'Editar Visita')),
       ),
-      body: Form(
-        key: _formKey,
-        child: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (widget.denunciaOrigem != null) ...[
-                        _buildDenunciaContextCard(widget.denunciaOrigem!),
-                        const SizedBox(height: 24),
-                      ],
-                      TextFormField(
-                        controller: _municipioController,
-                        readOnly: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Município',
-                          border: OutlineInputBorder(),
-                          filled: true,
-                          fillColor: Colors.black12,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Form(
+              key: _formKey,
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (widget.denunciaOrigem != null) ...[
+                              _buildDenunciaContextCard(widget.denunciaOrigem!),
+                              const SizedBox(height: 24),
+                            ],
+                            TextFormField(
+                              controller: _municipioController,
+                              readOnly: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Município',
+                                border: OutlineInputBorder(),
+                                filled: true,
+                                fillColor: Colors.black12,
+                              ),
+                              validator: (v) => (v == null || v.isEmpty)
+                                  ? 'Campo obrigatório'
+                                  : null,
+                            ),
+                            const SizedBox(height: 16),
+                            _buildExpansionPanelList(context, titleStyle),
+                          ],
                         ),
-                        validator: (v) =>
-                        (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
                       ),
-                      const SizedBox(height: 16),
-                      _buildExpansionPanelList(context, titleStyle),
-                    ],
-                  ),
+                    ),
+                    if (!_isViewMode) _buildSaveButton(theme),
+                  ],
                 ),
               ),
-              if (!_isViewMode) _buildSaveButton(theme),
-            ],
-          ),
-        ),
-      ),
+            ),
       floatingActionButton: _isViewMode
           ? FloatingActionButton.extended(
-        onPressed: () => setState(() => _isViewMode = false),
-        label: const Text('Editar'),
-        icon: const Icon(Icons.edit),
-      )
+              onPressed: () => setState(() => _isViewMode = false),
+              label: const Text('Editar'),
+              icon: const Icon(Icons.edit),
+            )
           : null,
     );
   }
@@ -409,7 +440,6 @@ class _RegistroOcorrenciaAgenteScreenState
             const SizedBox(height: 8),
             _buildInfoRow(context, Icons.home_work, 'Complemento',
                 denuncia.complemento ?? 'Não informado'),
-
           ],
         ),
       ),
@@ -516,14 +546,14 @@ class _RegistroOcorrenciaAgenteScreenState
             onChanged: isViewOnly
                 ? null
                 : (bool? selected) {
-              setState(() {
-                if (selected == true) {
-                  _tiposAtividade.add(tipo);
-                } else {
-                  _tiposAtividade.remove(tipo);
-                }
-              });
-            },
+                    setState(() {
+                      if (selected == true) {
+                        _tiposAtividade.add(tipo);
+                      } else {
+                        _tiposAtividade.remove(tipo);
+                      }
+                    });
+                  },
           );
         }).toList(),
         const SizedBox(height: 16),
@@ -536,7 +566,7 @@ class _RegistroOcorrenciaAgenteScreenState
           readOnly: true,
           onTap: isViewOnly ? null : _selectDate,
           validator: (v) =>
-          (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
+              (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
         ),
         if (_tiposAtividade.contains(TipoAtividade.atendimentoPIT)) ...[
           const SizedBox(height: 16),
@@ -551,16 +581,17 @@ class _RegistroOcorrenciaAgenteScreenState
             ),
             keyboardType: TextInputType.number,
             validator: (v) =>
-            (_tiposAtividade.contains(TipoAtividade.atendimentoPIT) &&
-                (v == null || v.isEmpty))
-                ? 'Campo obrigatório'
-                : null,
+                (_tiposAtividade.contains(TipoAtividade.atendimentoPIT) &&
+                        (v == null || v.isEmpty))
+                    ? 'Campo obrigatório'
+                    : null,
           ),
         ],
       ],
     );
   }
 
+  // Passo 5: Atualizar a Interface
   Widget _buildAddressSection({required bool isViewOnly}) {
     return _FormSection(
       children: [
@@ -568,13 +599,13 @@ class _RegistroOcorrenciaAgenteScreenState
           OutlinedButton.icon(
             icon: _isGettingLocation
                 ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2))
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.my_location),
             label: const Text('Usar Minha Localização'),
             onPressed:
-            _isGettingLocation ? null : _getCurrentLocationAndFillAddress,
+                _isGettingLocation ? null : _getCurrentLocationAndFillAddress,
           ),
           const SizedBox(height: 16),
         ],
@@ -582,27 +613,44 @@ class _RegistroOcorrenciaAgenteScreenState
           spacing: 16,
           runSpacing: 16,
           children: [
-            SizedBox(
-              width: double.infinity,
-              child: TextFormField(
-                  controller: _localidadeController,
-                  readOnly: isViewOnly,
-                  decoration: const InputDecoration(
-                      labelText: 'Localidade*', border: OutlineInputBorder()),
-                  validator: (v) =>
-                  (v == null || v.isEmpty) ? 'Campo obrigatório' : null),
+            DropdownButtonFormField<String>(
+              value: _selectedLocalidadeId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Localidade*',
+                border: OutlineInputBorder(),
+              ),
+              hint: const Text('Selecione uma localidade'),
+              items: _localidadesAgente.map((localidade) {
+                return DropdownMenuItem(
+                  value: localidade.id,
+                  child: Text(localidade.nome),
+                );
+              }).toList(),
+              onChanged: isViewOnly ? null : _onLocalidadeChanged,
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'Campo obrigatório';
+                }
+                return null;
+              },
             ),
             TextFormField(
                 controller: _codigoLocalidadeController,
-                readOnly: isViewOnly,
+                readOnly: true,
                 decoration: const InputDecoration(
                     labelText: 'Código da Localidade',
-                    border: OutlineInputBorder())),
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.black12)),
             TextFormField(
                 controller: _categoriaLocalidadeController,
-                readOnly: isViewOnly,
+                readOnly: true,
                 decoration: const InputDecoration(
-                    labelText: 'Categoria', border: OutlineInputBorder())),
+                    labelText: 'Categoria',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.black12)),
           ],
         ),
         const SizedBox(height: 16),
@@ -651,10 +699,10 @@ class _RegistroOcorrenciaAgenteScreenState
     return _FormSection(
       children: [
         _buildPendencySection('Pendência da Pesquisa', _pendenciaPesquisa,
-                (v) => setState(() => _pendenciaPesquisa = v), isViewOnly),
+            (v) => setState(() => _pendenciaPesquisa = v), isViewOnly),
         const Divider(height: 32),
         _buildPendencySection('Pendência da Borrifação', _pendenciaBorrifacao,
-                (v) => setState(() => _pendenciaBorrifacao = v), isViewOnly),
+            (v) => setState(() => _pendenciaBorrifacao = v), isViewOnly),
         const Divider(height: 32),
         TextFormField(
             controller: _nomeMoradorController,
@@ -672,7 +720,7 @@ class _RegistroOcorrenciaAgenteScreenState
                   onSelected: isViewOnly
                       ? null
                       : (bool selected) =>
-                      setState(() => _numeroAnexo = selected ? index : null));
+                          setState(() => _numeroAnexo = selected ? index : null));
             })),
         const Divider(height: 32),
         _buildFieldLabel(context, 'Situação do Imóvel*'),
@@ -681,7 +729,7 @@ class _RegistroOcorrenciaAgenteScreenState
             value: s,
             groupValue: _situacaoImovel,
             onChanged:
-            isViewOnly ? null : (v) => setState(() => _situacaoImovel = v))),
+                isViewOnly ? null : (v) => setState(() => _situacaoImovel = v))),
         const Divider(height: 32),
         DropdownButtonFormField<String>(
           value: _tipoParede,
@@ -735,12 +783,12 @@ class _RegistroOcorrenciaAgenteScreenState
       children: [
         _buildFieldLabel(context, title),
         ...Pendencia.values.map((p) => RadioListTile<Pendencia>(
-          title: Text(formatEnumName(p.name)),
-          value: p,
-          groupValue: groupValue,
-          onChanged: isViewOnly ? null : onChanged,
-          contentPadding: EdgeInsets.zero,
-        )),
+              title: Text(formatEnumName(p.name)),
+              value: p,
+              groupValue: groupValue,
+              onChanged: isViewOnly ? null : onChanged,
+              contentPadding: EdgeInsets.zero,
+            )),
       ],
     );
   }
@@ -794,20 +842,20 @@ class _RegistroOcorrenciaAgenteScreenState
       children: [
         _buildFieldLabel(context, title),
         ...CapturaStatus.values.map((s) => RadioListTile<CapturaStatus>(
-          title: Text(formatEnumName(s.name)),
-          value: s,
-          groupValue: status,
-          onChanged: isViewOnly ? null : onStatusChanged,
-        )),
+              title: Text(formatEnumName(s.name)),
+              value: s,
+              groupValue: status,
+              onChanged: isViewOnly ? null : onStatusChanged,
+            )),
         const SizedBox(height: 16),
         _buildFieldLabel(context, 'Vestígios Encontrados'),
         ...vestigios.keys.map((key) => CheckboxListTile(
-          title: Text(key),
-          value: vestigios[key],
-          onChanged: isViewOnly
-              ? null
-              : (val) => _handleVestigiosChange(vestigios, key, val!),
-        )),
+              title: Text(key),
+              value: vestigios[key],
+              onChanged: isViewOnly
+                  ? null
+                  : (val) => _handleVestigiosChange(vestigios, key, val!),
+            )),
         if (isTriatomineo) ...[
           const SizedBox(height: 16),
           TextFormField(
@@ -843,9 +891,9 @@ class _RegistroOcorrenciaAgenteScreenState
         if (allImages.isEmpty)
           const Center(
               child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 24.0),
-                child: Text('Nenhuma foto adicionada.'),
-              )),
+            padding: EdgeInsets.symmetric(vertical: 24.0),
+            child: Text('Nenhuma foto adicionada.'),
+          )),
         if (allImages.isNotEmpty)
           GridView.builder(
             shrinkWrap: true,
@@ -946,7 +994,7 @@ class _RegistroOcorrenciaAgenteScreenState
               onSelected: isViewOnly
                   ? null
                   : (bool selected) => setState(() => _numCargasController
-                  .text = selected ? index.toString() : '0'),
+                      .text = selected ? index.toString() : '0'),
             );
           }),
         ),
@@ -988,8 +1036,8 @@ class _RegistroOcorrenciaAgenteScreenState
     final pickedDate = await showDatePicker(
       context: context,
       initialDate:
-      DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ??
-          DateTime.now(),
+          DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ??
+              DateTime.now(),
       firstDate: DateTime(2000),
       lastDate: DateTime.now(),
     );
@@ -1033,7 +1081,7 @@ class _RegistroOcorrenciaAgenteScreenState
     final picker = ImagePicker();
     try {
       final pickedFile =
-      await picker.pickImage(source: source, imageQuality: 80);
+          await picker.pickImage(source: source, imageQuality: 80);
       if (pickedFile != null) {
         setState(() {
           _newlyAddedImages.add(pickedFile);
@@ -1064,8 +1112,6 @@ class _RegistroOcorrenciaAgenteScreenState
         if (placemarks.isNotEmpty) {
           final p = placemarks.first;
           setState(() {
-            _localidadeController.text =
-                p.subLocality ?? _localidadeController.text;
             _enderecoController.text = p.street ?? _enderecoController.text;
             _numeroController.text =
                 p.subThoroughfare ?? _numeroController.text;
@@ -1130,10 +1176,10 @@ class _RegistroOcorrenciaAgenteScreenState
         ),
         child: _isSaving
             ? const SizedBox(
-            height: 24,
-            width: 24,
-            child: CircularProgressIndicator(
-                color: Colors.white, strokeWidth: 3))
+                height: 24,
+                width: 24,
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 3))
             : Text(_isNew ? 'Salvar Registro' : 'Salvar Alterações'),
       ),
     );

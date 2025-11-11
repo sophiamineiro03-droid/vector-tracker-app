@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:vector_tracker_app/models/localidade_simples.dart';
 
 @immutable
 class Agente {
@@ -11,9 +12,8 @@ class Agente {
   final bool? ativo;
   final DateTime? createdAt;
 
-  // Campos join
   final String? municipioNome;
-  final List<String> localidades;
+  final List<LocalidadeSimples> localidades;
 
   const Agente({
     required this.id,
@@ -29,16 +29,14 @@ class Agente {
   });
 
   factory Agente.fromMap(Map<String, dynamic> map) {
-    // Lógica para extrair os nomes das localidades da nova estrutura da query
     final agentesLocalidadesData = map['agentes_localidades'] as List?;
-    final List<String> localidadesNomes = [];
+    final List<LocalidadeSimples> localidadesLista = [];
+    
     if (agentesLocalidadesData != null) {
       for (var item in agentesLocalidadesData) {
-        if (item is Map<String, dynamic> && item.containsKey('localidades')) {
-          final localidadeData = item['localidades'];
-          if (localidadeData is Map<String, dynamic> && localidadeData.containsKey('nome')) {
-            localidadesNomes.add(localidadeData['nome']);
-          }
+        final localidadeData = item?['localidades'];
+        if (localidadeData != null) {
+          localidadesLista.add(LocalidadeSimples.fromMap(localidadeData));
         }
       }
     }
@@ -53,7 +51,7 @@ class Agente {
       ativo: map['ativo'],
       createdAt: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
       municipioNome: map['municipios'] != null ? map['municipios']['nome'] : 'Município não encontrado',
-      localidades: localidadesNomes,
+      localidades: localidadesLista,
     );
   }
 
@@ -67,7 +65,7 @@ class Agente {
     bool? ativo,
     DateTime? createdAt,
     String? municipioNome,
-    List<String>? localidades,
+    List<LocalidadeSimples>? localidades,
   }) {
     return Agente(
       id: id ?? this.id,

@@ -18,8 +18,7 @@ class AgenteRepository {
       print('Buscando dados do agente logado: ${user.id}');
       final response = await _supabase
           .from('agentes')
-          // Este select agora busca o nome do município e os nomes das localidades associadas
-          .select('*, municipios(nome), agentes_localidades!inner(localidades(nome))')
+          .select('*, municipios(nome), agentes_localidades!inner(localidades(id, nome, codigo, categoria))')
           .eq('user_id', user.id)
           .single();
 

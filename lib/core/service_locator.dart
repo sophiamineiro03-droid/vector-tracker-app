@@ -14,7 +14,6 @@ class ServiceLocator {
   static Future<void> setup() async {
     _getIt.registerLazySingleton<SupabaseClient>(() => Supabase.instance.client);
 
-    // Registra os boxes do Hive que serão usados como dependência
     if (!_getIt.isRegistered<Box>(instanceName: 'denuncias_cache')) {
       _getIt.registerLazySingleton<Box>(() => Hive.box('denuncias_cache'),
           instanceName: 'denuncias_cache');
@@ -28,7 +27,6 @@ class ServiceLocator {
           instanceName: 'pending_ocorrencias');
     }
 
-    // Registra os repositórios
     _getIt.registerLazySingleton<DenunciaRepository>(
           () => DenunciaRepository(
         supabase: _getIt<SupabaseClient>(),
@@ -36,7 +34,6 @@ class ServiceLocator {
       ),
     );
 
-    // MODIFICADO: Fornece TODAS as dependências que o repositório agora precisa
     _getIt.registerLazySingleton<OcorrenciaRepository>(
           () => OcorrenciaRepository(
         supabase: _getIt<SupabaseClient>(),
@@ -49,7 +46,6 @@ class ServiceLocator {
           () => AgenteRepository(_getIt<SupabaseClient>()),
     );
 
-    // Serviços principais
     _getIt.registerLazySingleton<DenunciaService>(
           () => DenunciaService(),
     );
@@ -58,11 +54,11 @@ class ServiceLocator {
           () => AgentService(),
     );
 
-    // Registrando o serviço avançado ("Etapa 4")
+    // CORREÇÃO: Fornece os repositórios necessários para o serviço
     _getIt.registerLazySingleton<AgentOcorrenciaService>(
           () => AgentOcorrenciaService(
-        agenteRepository: _getIt<AgenteRepository>(),
-        ocorrenciaRepository: _getIt<OcorrenciaRepository>(),
+        _getIt<AgenteRepository>(),
+        _getIt<OcorrenciaRepository>(),
       ),
     );
   }

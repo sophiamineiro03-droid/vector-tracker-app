@@ -5,7 +5,7 @@ class Ocorrencia {
   final String? agente_id;
   final String? denuncia_id;
   final String? localidade_id;
-  final List<TipoAtividade>? tipo_atividade; // <<< CORRIGIDO
+  final List<TipoAtividade>? tipo_atividade;
   final DateTime? data_atividade;
   final String? numero_pit;
   final String? endereco;
@@ -30,11 +30,12 @@ class Ocorrencia {
   final String? inseticida;
   final int? numero_cargas;
   final String? codigo_etiqueta;
-  final List<String>? localImagePaths;
+  final List<String>? localImagePaths; 
+  final List<String>? fotos_urls;
   final DateTime? created_at;
   final bool sincronizado;
 
-  // UI Fields
+  // Campos que existem APENAS no App, não no banco de dados
   final String? municipio_id_ui;
   final String? localidade_ui;
   final String? setor_id_ui;
@@ -44,7 +45,7 @@ class Ocorrencia {
     this.agente_id,
     this.denuncia_id,
     this.localidade_id,
-    this.tipo_atividade, // <<< CORRIGIDO
+    this.tipo_atividade,
     this.data_atividade,
     this.numero_pit,
     this.endereco,
@@ -70,6 +71,7 @@ class Ocorrencia {
     this.numero_cargas,
     this.codigo_etiqueta,
     this.localImagePaths,
+    this.fotos_urls,
     this.created_at,
     required this.sincronizado,
     this.municipio_id_ui,
@@ -83,7 +85,6 @@ class Ocorrencia {
       agente_id: map['agente_id'],
       denuncia_id: map['denuncia_id'],
       localidade_id: map['localidade_id'],
-      // <<< CORRIGIDO
       tipo_atividade: map['tipo_atividade'] is List
           ? (map['tipo_atividade'] as List)
               .map((e) => TipoAtividade.values.firstWhere((v) => v.name == e, orElse: () => TipoAtividade.pesquisa))
@@ -114,6 +115,7 @@ class Ocorrencia {
       numero_cargas: map['numero_cargas'],
       codigo_etiqueta: map['codigo_etiqueta'],
       localImagePaths: map['localImagePaths'] != null ? List<String>.from(map['localImagePaths']) : [],
+      fotos_urls: map['fotos_urls'] != null ? List<String>.from(map['fotos_urls']) : [],
       created_at: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
       sincronizado: map['sincronizado'] ?? false,
       municipio_id_ui: map['municipio_id_ui'],
@@ -123,12 +125,13 @@ class Ocorrencia {
   }
 
   Map<String, dynamic> toMap() {
+    // CORREÇÃO: Apenas campos que existem no banco de dados são incluídos.
     return {
       'id': id,
       'agente_id': agente_id,
       'denuncia_id': denuncia_id,
       'localidade_id': localidade_id,
-      'tipo_atividade': tipo_atividade?.map((e) => e.name).toList(), // <<< CORRIGIDO
+      'tipo_atividade': tipo_atividade?.map((e) => e.name).toList(),
       'data_atividade': data_atividade?.toIso8601String(),
       'numero_pit': numero_pit,
       'endereco': endereco,
@@ -153,12 +156,8 @@ class Ocorrencia {
       'inseticida': inseticida,
       'numero_cargas': numero_cargas,
       'codigo_etiqueta': codigo_etiqueta,
-      'localImagePaths': localImagePaths,
       'created_at': created_at?.toIso8601String(),
-      'sincronizado': sincronizado,
-      'municipio_id_ui': municipio_id_ui,
-      'localidade_ui': localidade_ui,
-      'setor_id_ui': setor_id_ui,
+      'fotos_urls': fotos_urls,
     };
   }
 
@@ -167,7 +166,7 @@ class Ocorrencia {
     String? agente_id,
     String? denuncia_id,
     String? localidade_id,
-    List<TipoAtividade>? tipo_atividade, // <<< CORRIGIDO
+    List<TipoAtividade>? tipo_atividade,
     DateTime? data_atividade,
     String? numero_pit,
     String? endereco,
@@ -193,6 +192,7 @@ class Ocorrencia {
     int? numero_cargas,
     String? codigo_etiqueta,
     List<String>? localImagePaths,
+    List<String>? fotos_urls,
     DateTime? created_at,
     bool? sincronizado,
     String? municipio_id_ui,
@@ -204,7 +204,7 @@ class Ocorrencia {
       agente_id: agente_id ?? this.agente_id,
       denuncia_id: denuncia_id ?? this.denuncia_id,
       localidade_id: localidade_id ?? this.localidade_id,
-      tipo_atividade: tipo_atividade ?? this.tipo_atividade, // <<< CORRIGIDO
+      tipo_atividade: tipo_atividade ?? this.tipo_atividade,
       data_atividade: data_atividade ?? this.data_atividade,
       numero_pit: numero_pit ?? this.numero_pit,
       endereco: endereco ?? this.endereco,
@@ -230,6 +230,7 @@ class Ocorrencia {
       numero_cargas: numero_cargas ?? this.numero_cargas,
       codigo_etiqueta: codigo_etiqueta ?? this.codigo_etiqueta,
       localImagePaths: localImagePaths ?? this.localImagePaths,
+      fotos_urls: fotos_urls ?? this.fotos_urls,
       created_at: created_at ?? this.created_at,
       sincronizado: sincronizado ?? this.sincronizado,
       municipio_id_ui: municipio_id_ui ?? this.municipio_id_ui,

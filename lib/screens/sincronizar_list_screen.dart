@@ -38,7 +38,7 @@ class SincronizarListScreen extends StatelessWidget {
           return RefreshIndicator(
             onRefresh: () => agentService.forceRefresh(),
             child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 80), // Espaço para o FAB
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
               itemCount: pendentes.length,
               itemBuilder: (context, index) {
                 final ocorrencia = pendentes[index];
@@ -50,7 +50,6 @@ class SincronizarListScreen extends StatelessWidget {
                 return Card(
                   elevation: 2,
                   margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  // --- FUNCIONALIDADE DE CLIQUE RESTAURADA ---
                   child: ListTile(
                     leading: const Icon(Icons.sync_problem, color: Colors.orange),
                     title: Text(
@@ -58,13 +57,12 @@ class SincronizarListScreen extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text('Pendente desde $data'),
-                    trailing: const Icon(Icons.edit), // Ícone para indicar edição
+                    trailing: const Icon(Icons.edit),
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
                           builder: (context) => RegistroOcorrenciaAgenteScreen(
                             ocorrencia: ocorrencia,
-                            // Abre em modo de edição (padrão)
                           ),
                         ),
                       );
@@ -89,14 +87,14 @@ class SincronizarListScreen extends StatelessWidget {
                 const SnackBar(content: Text('Iniciando sincronização...')),
               );
 
-              final result = await agentService.syncPendingOcorrencias();
+              final resultMessage = await agentService.syncPendingOcorrencias();
 
               if (context.mounted) {
                 ScaffoldMessenger.of(context).hideCurrentSnackBar();
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(result.message),
-                    backgroundColor: result.success ? Colors.green : Colors.red,
+                    content: Text(resultMessage), // Usa a mensagem de texto diretamente
+                    backgroundColor: resultMessage.contains('sucesso') ? Colors.green : Colors.red, // Determina a cor pela mensagem
                   ),
                 );
               }
