@@ -23,15 +23,13 @@ class SmartImage extends StatelessWidget {
   Widget build(BuildContext context) {
     bool isNetworkImage = imageSource.startsWith('http');
 
-    // CORREÇÃO: Cria um widget de erro padronizado que SEMPRE tem um tamanho.
-    // Isso evita o erro 'RenderBox was not laid out'.
     Widget errorWidget = SizedBox(
       width: width,
       height: height,
       child: Center(
         child: Icon(
           Icons.broken_image,
-          size: 48.0, // Tamanho fixo para o ícone
+          size: 40.0, // Tamanho ajustado
           color: Colors.grey[400],
         ),
       ),
@@ -43,19 +41,26 @@ class SmartImage extends StatelessWidget {
       width: width,
       height: height,
       fit: fit,
+      // --- A CORREÇÃO ESTÁ AQUI ---
       loadingBuilder: (BuildContext context, Widget child,
           ImageChunkEvent? loadingProgress) {
         if (loadingProgress == null) return child;
-        return Center(
-          child: CircularProgressIndicator(
-            value: loadingProgress.expectedTotalBytes != null
-                ? loadingProgress.cumulativeBytesLoaded /
-                loadingProgress.expectedTotalBytes!
-                : null,
+        // Garante que o indicador de loading tenha um tamanho fixo,
+        // evitando o erro de layout no ListTile.
+        return SizedBox(
+          width: width,
+          height: height,
+          child: Center(
+            child: CircularProgressIndicator(
+              strokeWidth: 2.0, // Deixa o círculo mais fino
+              value: loadingProgress.expectedTotalBytes != null
+                  ? loadingProgress.cumulativeBytesLoaded /
+                  loadingProgress.expectedTotalBytes!
+                  : null,
+            ),
           ),
         );
       },
-      // Usa o widget de erro padronizado.
       errorBuilder: (context, error, stackTrace) => errorWidget,
     )
         : Image.file(
@@ -63,7 +68,6 @@ class SmartImage extends StatelessWidget {
       width: width,
       height: height,
       fit: fit,
-      // Usa o widget de erro padronizado também para arquivos locais.
       errorBuilder: (context, error, stackTrace) => errorWidget,
     );
   }

@@ -1,6 +1,5 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
-import 'package:get_it/get_it.dart';
+import 'package:flutter/foundation.dart';import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -37,8 +36,10 @@ class AgentOcorrenciaService extends ChangeNotifier {
   Future<void> fetchOcorrencias() async {
     _setLoading(true);
     try {
+      // Continua carregando do cache primeiro para uma UI rápida
       _ocorrencias = await _ocorrenciaRepository.getOcorrenciasFromCache();
       notifyListeners();
+      // Depois busca os dados mais recentes da rede
       await forceRefresh();
     } catch (e) {
       AppLogger.error('Erro ao buscar ocorrências', e);
@@ -47,10 +48,23 @@ class AgentOcorrenciaService extends ChangeNotifier {
     }
   }
 
+  // --- 1. MÉTODO DE BUSCA CORRIGIDO ---
   Future<void> forceRefresh() async {
     _setLoading(true);
     try {
-      _ocorrencias = await _ocorrenciaRepository.fetchAllOcorrenciasFromSupabase();
+      // Busca o agente logado para saber quem estamos buscando
+      final agente = await _agenteRepository.getCurrentAgent();
+      if (agente == null) {
+        AppLogger.warning('Nenhum agente logado, limpando lista de ocorrências.');
+        _ocorrencias = [];
+        notifyListeners();
+        return;
+      }
+
+      // Chama o método CORRETO do repositório, passando o ID do agente
+      _ocorrencias = await _ocorrenciaRepository.fetchOcorrenciasByAgenteFromSupabase(agente.id);
+      notifyListeners();
+
     } catch (e) {
       AppLogger.error('Erro ao forçar atualização', e);
     } finally {
@@ -58,6 +72,7 @@ class AgentOcorrenciaService extends ChangeNotifier {
     }
   }
 
+  // --- 2. MÉTODO DE SALVAMENTO CORRIGIDO (COM UPDATE) ---
   Future<void> saveOcorrencia(Ocorrencia ocorrencia) async {
     _setLoading(true);
     try {
@@ -66,14 +81,11 @@ class AgentOcorrenciaService extends ChangeNotifier {
 
       var ocorrenciaToUpload = ocorrencia.copyWith(agente_id: agente.id);
 
-      // Lista que vai guardar todas as URLs finais
       List<String> finalImageUrls = [];
-      // Adiciona as fotos que já eram URLs (vindas de uma denúncia ou edição)
       if(ocorrenciaToUpload.fotos_urls != null) {
         finalImageUrls.addAll(ocorrenciaToUpload.fotos_urls!);
       }
 
-      // Faz o upload das novas fotos que foram tiradas no celular
       if (ocorrenciaToUpload.localImagePaths != null && ocorrenciaToUpload.localImagePaths!.isNotEmpty) {
         for (String path in ocorrenciaToUpload.localImagePaths!) {
           String? publicUrl = await _uploadImage(path, ocorrenciaToUpload.id);
@@ -83,25 +95,53 @@ class AgentOcorrenciaService extends ChangeNotifier {
         }
       }
 
-      // Cria o objeto final com as URLs consolidadas e status de sincronizado
       ocorrenciaToUpload = ocorrenciaToUpload.copyWith(
         fotos_urls: finalImageUrls,
-        localImagePaths: [], // Limpa os caminhos locais, pois já foram processados
+        localImagePaths: [],
         sincronizado: true,
       );
 
-      // Agora sim, insere o registro completo e correto no Supabase
-      await _ocorrenciaRepository.insertInSupabase(ocorrenciaToUpload);
-      print('Ocorrência salva diretamente no Supabase com sucesso!');
-
+      // --- LÓGICA DE SALVAMENTO SIMPLIFICADA COM UPSERT ---
+      // A função 'upsert' do Supabase faz o trabalho de dois:
+      // 1. Se um registro com o mesmo 'id' já existe, ele ATUALIZA.
+      // 2. Se não existe, ele CRIA um novo.
+      // Isso elimina a necessidade da verificação manual.
+      final data = ocorrenciaToUpload.toMap();
+      await _supabase.from('ocorrencias').upsert(data);
+      AppLogger.info('Ocorrência ${ocorrenciaToUpload.id} salva (upsert) no Supabase!');
+      // --- INÍCIO DA CORREÇÃO ---
+      // Se esta ocorrência veio de uma denúncia, atualizamos o status dela.
+      if (ocorrenciaToUpload.denuncia_id != null && ocorrenciaToUpload.denuncia_id!.isNotEmpty) {
+        try {
+          await _supabase
+              .from('denuncias')
+              .update({'status': 'atendida'}) // Muda o status para 'atendida'
+              .eq('id', ocorrenciaToUpload.denuncia_id!);
+          AppLogger.info('Status da denúncia ${ocorrenciaToUpload.denuncia_id} atualizado para "atendida".');
+          // TODO: INICIAR ATUALIZAÇÃO DO CACHE DE DENÚNCIAS.
+          // O status da denúncia foi atualizado no Supabase, mas a lista de
+          // pendências (DenunciaService) pode estar usando um cache local.
+          // É preciso invalidar esse cache para que a denúncia atendida
+          // desapareça da tela de pendências imediatamente.
+          //
+          // AÇÃO FUTURA:
+          // 1. Adicionar: import 'package:vector_tracker_app/services/denuncia_service.dart';
+          // 2. Registrar o DenunciaService no GetIt (no main.dart).
+          // 3. Obter a instância com: GetIt.I.get<DenunciaService>()
+          // 4. Chamar um método para forçar a atualização: await service.fetchItems();
+        } catch (e, s) {
+          // Apenas registra o erro, não para a execução
+          AppLogger.error('Falha ao atualizar o status da denúncia original.', e, s);
+        }
+      }
+      // --- FIM DA CORREÇÃO ---
     } catch (e) {
       AppLogger.warning('Falha ao salvar online, salvando localmente.', e);
-      // Se falhar, o objeto 'ocorrencia' original ainda tem os caminhos locais
       await _ocorrenciaRepository.saveToPendingBox(ocorrencia.copyWith(sincronizado: false));
     } finally {
-      await fetchOcorrencias();
+      // Força a atualização da lista para refletir a mudança
+      await forceRefresh();
       _setLoading(false);
-      // Dispara a sincronização para garantir que qualquer pendência seja resolvida
       syncPendingOcorrencias();
     }
   }
@@ -113,7 +153,6 @@ class AgentOcorrenciaService extends ChangeNotifier {
       return null;
     }
 
-    // Cria um nome de arquivo único para evitar sobreposições
     final fileName = '${ocorrenciaId}/${const Uuid().v4()}.${filePath.split('.').last}';
 
     try {
@@ -139,37 +178,11 @@ class AgentOcorrenciaService extends ChangeNotifier {
     int successCount = 0;
     for (var ocorrencia in pending) {
       try {
-        var ocorrenciaToSync = ocorrencia;
-        List<String> finalImageUrls = [];
-
-        if (ocorrencia.localImagePaths != null && ocorrencia.localImagePaths!.isNotEmpty) {
-          AppLogger.sync('Processando ${ocorrencia.localImagePaths!.length} imagens para a ocorrência ${ocorrencia.id}');
-          for (String path in ocorrencia.localImagePaths!) {
-            if (path.startsWith('http')) {
-              finalImageUrls.add(path); // Já é uma URL, mantém
-            } else {
-              // É um caminho local, precisa fazer upload
-              String? publicUrl = await _uploadImage(path, ocorrencia.id);
-              if (publicUrl != null) {
-                finalImageUrls.add(publicUrl);
-              }
-            }
-          }
-          // Atualiza o objeto com as novas URLs
-          ocorrenciaToSync = ocorrenciaToSync.copyWith(fotos_urls: finalImageUrls);
-        }
-
-        // Garante que o status de sincronizado seja verdadeiro
-        ocorrenciaToSync = ocorrenciaToSync.copyWith(sincronizado: true);
-
-        // Salva a ocorrência completa no Supabase
-        await _ocorrenciaRepository.insertInSupabase(ocorrenciaToSync);
-
-        // Se tudo deu certo, remove do cache de pendentes
+        // Reutiliza a lógica principal de salvamento para sincronizar
+        await saveOcorrencia(ocorrencia);
         await _ocorrenciaRepository.deleteFromPendingBox(ocorrencia.id);
         successCount++;
-        AppLogger.sync('Ocorrência ${ocorrencia.id} sincronizada com sucesso!');
-
+        AppLogger.sync('Ocorrência pendente ${ocorrencia.id} sincronizada com sucesso!');
       } catch (e, s) {
         AppLogger.error('Erro ao sincronizar ocorrência ${ocorrencia.id}', e, s);
       }
@@ -181,7 +194,7 @@ class AgentOcorrenciaService extends ChangeNotifier {
 
     AppLogger.sync(message);
     _setSyncing(false);
-    await fetchOcorrencias(); // Atualiza a UI com os dados novos
+    await forceRefresh(); // Atualiza a UI com os dados novos
     return message;
   }
 

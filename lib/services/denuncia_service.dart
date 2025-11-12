@@ -169,7 +169,33 @@ class DenunciaService with ChangeNotifier {
     await fetchItems();
     syncPendingDenuncias();
   }
+  // --- Adicione este novo método ---
+  Future<void> updateDenunciaStatus(String denunciaId, String novoStatus) async {
+    try {
+      // Atualiza o status no Supabase
+      await _supabase
+          .from('denuncias')
+          .update({'status': novoStatus})
+          .eq('id', denunciaId);
 
+      // Atualiza o cache local para refletir a mudança imediatamente
+      final cachedDenuncia = _denunciasCache.get(denunciaId);
+      if (cachedDenuncia != null) {
+        final denunciaMap = Map<String, dynamic>.from(cachedDenuncia as Map);
+        denunciaMap['status'] = novoStatus;
+        await _denunciasCache.put(denunciaId, denunciaMap);
+      }
+
+      // Força a atualização da lista na UI
+      await fetchItems();
+
+      AppLogger.info('Status da denúncia $denunciaId atualizado para $novoStatus');
+    } catch (e, s) {
+      AppLogger.error('Erro ao atualizar status da denúncia $denunciaId', e, s);
+      // Opcional: Lançar o erro para a UI tratar, se necessário
+      // throw Exception('Não foi possível atualizar o status da denúncia.');
+    }
+  }
   Future<void> fetchMunicipios() async {
     _isMunicipiosLoading = true;
     notifyListeners();

@@ -14,13 +14,20 @@ class OcorrenciaRepository {
   })  : _cacheBox = cacheBox,
         _pendingBox = pendingBox;
 
-  Future<List<Ocorrencia>> fetchAllOcorrenciasFromSupabase() async {
+  // --- MÉTODO CORRIGIDO ---
+  // Agora ele exige o ID do agente e filtra a busca no Supabase
+  Future<List<Ocorrencia>> fetchOcorrenciasByAgenteFromSupabase(String agenteId) async {
     try {
-      final response = await supabase.from('ocorrencias').select();
+      final response = await supabase
+          .from('ocorrencias')
+          .select()
+          .eq('agente_id', agenteId); // <-- A CORREÇÃO ESTÁ AQUI
+
       final ocorrencias = (response as List)
           .map((item) => Ocorrencia.fromMap(item as Map<String, dynamic>))
           .toList();
-      
+
+      // Limpa o cache antigo e salva os novos dados filtrados
       await _cacheBox.clear();
       for (var oc in ocorrencias) {
         await _cacheBox.put(oc.id, oc.toMap());

@@ -17,6 +17,8 @@ import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
 import 'package:vector_tracker_app/util/location_util.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 import 'package:vector_tracker_app/widgets/smart_image.dart';
+import 'package:vector_tracker_app/services/denuncia_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 String formatEnumName(String name) {
   switch (name) {
@@ -81,6 +83,9 @@ class _RegistroOcorrenciaAgenteScreenState
   bool _isLoading = true;
   List<LocalidadeSimples> _localidadesAgente = [];
   String? _selectedLocalidadeId;
+  // --- Adicione estas linhas ---
+  Denuncia? _denunciaContexto;
+  bool _isLoadingContexto = false;
 
   final _dataAtividadeController = TextEditingController();
   final _numeroPITController = TextEditingController();
@@ -118,6 +123,7 @@ class _RegistroOcorrenciaAgenteScreenState
     _initializeFormData();
   }
 
+  // --- Substitua o seu método _initializeFormData que está quebrado por este ---
   Future<void> _initializeFormData() async {
     if (!mounted) return;
 
@@ -132,6 +138,10 @@ class _RegistroOcorrenciaAgenteScreenState
 
     if (widget.ocorrencia != null) {
       _populateFromOcorrencia(widget.ocorrencia!);
+      // Lógica do Passo 4: Se a ocorrência tem um ID de denúncia, busca o contexto.
+      if (widget.ocorrencia!.denuncia_id != null) {
+        _fetchDenunciaContexto(widget.ocorrencia!.denuncia_id!);
+      }
     } else if (widget.denunciaOrigem != null) {
       _populateFromDenuncia(widget.denunciaOrigem!);
     } else {
@@ -149,15 +159,43 @@ class _RegistroOcorrenciaAgenteScreenState
     }
   }
 
-  void _onLocalidadeChanged(String? newId) {
-    if (newId == null) return;
-    setState(() {
-      _selectedLocalidadeId = newId;
-      _codigoLocalidadeController.clear();
-      _categoriaLocalidadeController.clear();
-    });
-  }
+// --- O novo método vem logo depois ---
+Future<void> _fetchDenunciaContexto(String denunciaId) async {
+  setState(() => _isLoadingContexto = true);
+  try {
+    final denunciaService = context.read<DenunciaService>();
+    // Substitua a linha com erro por estas:
+    final response = await Supabase.instance.client
+        .from('denuncias')
+        .select('*, municipios!cidade(nome)')
+        .eq('id', denunciaId)
+        .single();
+    final denuncia = Denuncia.fromMap(response);
 
+    if (denuncia != null && mounted) {
+      setState(() {
+        _denunciaContexto = denuncia;
+      });
+    }
+  } catch (e) {
+    if (kDebugMode) {
+      print("Erro ao buscar contexto da denúncia: $e");
+    }
+  } finally {
+    if (mounted) {
+      setState(() => _isLoadingContexto = false);
+    }
+  }
+}
+
+void _onLocalidadeChanged(String? newId) {
+  if (newId == null) return;
+  setState(() {
+    _selectedLocalidadeId = newId;
+    _codigoLocalidadeController.clear();
+    _categoriaLocalidadeController.clear();
+  });
+}
 
   void _populateFromOcorrencia(Ocorrencia oco) {
 // Apenas mude a condição do 'if'
@@ -277,7 +315,7 @@ class _RegistroOcorrenciaAgenteScreenState
     final ocorrenciaToSave = Ocorrencia(
       id: widget.ocorrencia?.id ?? const Uuid().v4(),
       agente_id: currentAgent?.id,
-      denuncia_id: widget.denunciaOrigem?.id,
+      denuncia_id: widget.ocorrencia?.denuncia_id ?? widget.denunciaOrigem?.id,
       localidade_id: _selectedLocalidadeId,
       tipo_atividade: _tiposAtividade.toList(),
       data_atividade: dataAtividade,
@@ -330,6 +368,17 @@ class _RegistroOcorrenciaAgenteScreenState
     try {
       await agentOcorrenciaService.saveOcorrencia(ocorrenciaToSave);
 
+      // --- INÍCIO DA NOVA LÓGICA ---
+      // Se esta ocorrência veio de uma denúncia, atualiza o status dela para 'atendida'.
+      if (ocorrenciaToSave.denuncia_id != null) {
+        final denunciaService = context.read<DenunciaService>();
+        await denunciaService.updateDenunciaStatus(
+          ocorrenciaToSave.denuncia_id!,
+          'atendida', // ou 'concluida', o status que você usa no seu banco
+        );
+      }
+      // --- FIM DA NOVA LÓGICA ---
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(
@@ -375,10 +424,25 @@ class _RegistroOcorrenciaAgenteScreenState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
+                            // Se estiver ATENDENDO uma nova denúncia, mostra o card
                             if (widget.denunciaOrigem != null) ...[
                               _buildDenunciaContextCard(widget.denunciaOrigem!),
                               const SizedBox(height: 24),
-                            ],
+                            ]
+// Se estiver EDITANDO e o contexto já foi carregado, mostra o card
+                            else if (_denunciaContexto != null) ...[
+                              _buildDenunciaContextCard(_denunciaContexto!),
+                              const SizedBox(height: 24),
+                            ]
+// Se estiver carregando o contexto, mostra um indicador
+                            else if (_isLoadingContexto) ...[
+                                const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16.0),
+                                      child: CircularProgressIndicator(),
+                                    )),
+                                const SizedBox(height: 24),
+                              ],
                             TextFormField(
                               controller: _municipioController,
                               readOnly: true,
@@ -413,6 +477,7 @@ class _RegistroOcorrenciaAgenteScreenState
     );
   }
 
+  // --- Substitua o método inteiro por esta versão atualizada ---
   Widget _buildDenunciaContextCard(Denuncia denuncia) {
     final theme = Theme.of(context);
     String endereco =
@@ -420,6 +485,7 @@ class _RegistroOcorrenciaAgenteScreenState
 
     return Card(
       elevation: 4,
+      color: Colors.blueGrey[50], // Cor de destaque adicionada
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -427,9 +493,9 @@ class _RegistroOcorrenciaAgenteScreenState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Contexto da Denúncia',
+              'Contexto da Denúncia Original', // Título mais claro
               style: theme.textTheme.titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold),
+                  ?.copyWith(fontWeight: FontWeight.bold, color: Colors.black87),
             ),
             const SizedBox(height: 16),
             if (denuncia.foto_url != null && denuncia.foto_url!.isNotEmpty) ...[
