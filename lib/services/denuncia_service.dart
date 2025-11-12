@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io'; // Import necessário para lidar com arquivos
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
@@ -40,16 +41,17 @@ class DenunciaService with ChangeNotifier {
   }
 
   void _listenToConnectivity() {
-    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((connectivityResult) {
-      final isOnline = connectivityResult == ConnectivityResult.mobile ||
-                      connectivityResult == ConnectivityResult.wifi;
-      if (isOnline) {
-        AppLogger.info('Conexão detectada no DenunciaService, sincronizando...');
-        syncPendingDenuncias();
-      }
-    });
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((connectivityResult) {
+          final isOnline = connectivityResult == ConnectivityResult.mobile ||
+              connectivityResult == ConnectivityResult.wifi;
+          if (isOnline) {
+            AppLogger.info('Conexão detectada no DenunciaService, sincronizando...');
+            syncPendingDenuncias();
+          }
+        });
   }
-  
+
   @override
   void dispose() {
     _connectivitySubscription?.cancel();
@@ -65,13 +67,38 @@ class DenunciaService with ChangeNotifier {
       _isSyncing = false;
       return;
     }
-    
+
     AppLogger.sync('Sincronizando ${pending.length} denúncias pendentes.');
 
     for (var denunciaData in pending) {
       try {
         final denunciaMap = Map<String, dynamic>.from(denunciaData as Map);
         final id = denunciaMap['id'];
+
+        // --- INÍCIO DA LÓGICA DE UPLOAD ---
+        final localPhotoPath = denunciaMap['foto_url'];
+
+        // Verifica se é um caminho local e não uma URL da web
+        if (localPhotoPath != null && !localPhotoPath.startsWith('http')) {
+          final file = File(localPhotoPath);
+          if (await file.exists()) {
+            final fileName = localPhotoPath.split('/').last;
+            final filePath = '$id/$fileName';
+
+            // Faz o upload para o bucket correto
+            await _supabase.storage.from('imagens_denuncias').upload(
+              filePath,
+              file,
+              fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
+            );
+
+            // Obtém a URL pública e atualiza o mapa
+            final publicUrl = _supabase.storage.from('imagens_denuncias').getPublicUrl(filePath);
+            denunciaMap['foto_url'] = publicUrl;
+            AppLogger.sync('Upload da foto $filePath realizado com sucesso.');
+          }
+        }
+        // --- FIM DA LÓGICA DE UPLOAD ---
 
         await _supabase.from('denuncias').upsert(denunciaMap);
         await _pendingDenunciasBox.delete(id);
@@ -105,13 +132,14 @@ class DenunciaService with ChangeNotifier {
       notifyListeners();
 
       final connectivityResult = await Connectivity().checkConnectivity();
-      final isOnline = connectivityResult == ConnectivityResult.mobile || 
-                      connectivityResult == ConnectivityResult.wifi;
+      final isOnline = connectivityResult == ConnectivityResult.mobile ||
+          connectivityResult == ConnectivityResult.wifi;
 
       if (isOnline) {
-        final response = await _supabase.from('denuncias').select();
+        final response = await _supabase.from('denuncias').select(
+            '*, municipios!cidade(nome), localidades!localidade_id(nome)');
         final remoteItems = List<Map<String, dynamic>>.from(response);
-        
+
         await _denunciasCache.clear();
         for (var item in remoteItems) {
           _denunciasCache.put(item['id'], item);
@@ -121,7 +149,7 @@ class DenunciaService with ChangeNotifier {
         final pendingAgain = _pendingDenunciasBox.values.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         final finalUniqueItems = <String, Map<String, dynamic>>{};
         for (var item in [...combined, ...pendingAgain]) {
-           finalUniqueItems[item['id']] = item;
+          finalUniqueItems[item['id']] = item;
         }
         _items = finalUniqueItems.values.toList();
       }
@@ -147,7 +175,8 @@ class DenunciaService with ChangeNotifier {
     notifyListeners();
     try {
       final response = await _supabase.from('municipios').select('id, nome');
-      _municipios = (response as List).map((map) => Municipio.fromMap(map)).toList();
+      _municipios =
+          (response as List).map((map) => Municipio.fromMap(map)).toList();
     } catch (e, s) {
       AppLogger.error('Erro ao buscar municípios', e, s);
     } finally {
@@ -166,22 +195,24 @@ class DenunciaService with ChangeNotifier {
           .from('localidades')
           .select('id, nome')
           .eq('municipio_id', municipioId);
-      _localidades = (response as List).map((map) => Localidade.fromMap(map)).toList();
+      _localidades =
+          (response as List).map((map) => Localidade.fromMap(map)).toList();
     } catch (e, s) {
-      AppLogger.error('Erro ao buscar localidades para o município $municipioId', e, s);
+      AppLogger.error(
+          'Erro ao buscar localidades para o município $municipioId', e, s);
     } finally {
       _isLocalidadesLoading = false;
       notifyListeners();
     }
   }
-  
-  void clearLocalidades(){
+
+  void clearLocalidades() {
     _localidades = [];
     notifyListeners();
   }
 
   void updateItemInList(Map<String, dynamic> updatedItem) {
-     final index = _items.indexWhere((item) => item['id'] == updatedItem['id']);
+    final index = _items.indexWhere((item) => item['id'] == updatedItem['id']);
     if (index != -1) {
       _items[index] = updatedItem;
       notifyListeners();

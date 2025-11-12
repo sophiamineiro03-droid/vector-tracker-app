@@ -23,13 +23,26 @@ class SmartImage extends StatelessWidget {
   Widget build(BuildContext context) {
     bool isNetworkImage = imageSource.startsWith('http');
 
+    // CORREÇÃO: Cria um widget de erro padronizado que SEMPRE tem um tamanho.
+    // Isso evita o erro 'RenderBox was not laid out'.
+    Widget errorWidget = SizedBox(
+      width: width,
+      height: height,
+      child: Center(
+        child: Icon(
+          Icons.broken_image,
+          size: 48.0, // Tamanho fixo para o ícone
+          color: Colors.grey[400],
+        ),
+      ),
+    );
+
     return isNetworkImage
         ? Image.network(
       imageSource,
       width: width,
       height: height,
       fit: fit,
-      // Adiciona um indicador de carregamento para imagens da rede.
       loadingBuilder: (BuildContext context, Widget child,
           ImageChunkEvent? loadingProgress) {
         if (loadingProgress == null) return child;
@@ -42,24 +55,16 @@ class SmartImage extends StatelessWidget {
           ),
         );
       },
-      // Mostra um ícone de erro se a imagem da rede falhar ao carregar.
-      errorBuilder: (context, error, stackTrace) => Icon(
-        Icons.broken_image,
-        size: width != null ? width! * 0.5 : 48.0,
-        color: Colors.grey,
-      ),
+      // Usa o widget de erro padronizado.
+      errorBuilder: (context, error, stackTrace) => errorWidget,
     )
         : Image.file(
       File(imageSource),
       width: width,
       height: height,
       fit: fit,
-      // Mostra um ícone de erro se o arquivo local não for encontrado.
-      errorBuilder: (context, error, stackTrace) => Icon(
-        Icons.broken_image,
-        size: width != null ? width! * 0.5 : 48.0,
-        color: Colors.grey,
-      ),
+      // Usa o widget de erro padronizado também para arquivos locais.
+      errorBuilder: (context, error, stackTrace) => errorWidget,
     );
   }
 }
