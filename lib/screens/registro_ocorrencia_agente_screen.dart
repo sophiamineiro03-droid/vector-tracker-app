@@ -158,9 +158,11 @@ class _RegistroOcorrenciaAgenteScreenState
     });
   }
 
+
   void _populateFromOcorrencia(Ocorrencia oco) {
-    if (oco.localImagePaths != null) {
-      _localImagePaths.addAll(oco.localImagePaths!);
+// Apenas mude a condição do 'if'
+    if (oco.fotos_urls != null) {
+      _localImagePaths.addAll(oco.fotos_urls!);
     }
     _dataAtividadeController.text = oco.data_atividade != null
         ? DateFormat('dd/MM/yyyy').format(oco.data_atividade!)
@@ -206,17 +208,30 @@ class _RegistroOcorrenciaAgenteScreenState
 
   void _populateFromDenuncia(Denuncia den) {
     _tiposAtividade.clear();
+    // Garante que o tipo de atividade padrão seja 'pesquisa' ao atender uma denúncia
+    _tiposAtividade.add(TipoAtividade.pesquisa);
 
     _dataAtividadeController.text =
         DateFormat('dd/MM/yyyy').format(DateTime.now());
     _municipioController.text = den.municipioNome ?? den.cidade ?? '';
 
-    _selectedLocalidadeId = den.localidade_id; // <-- A ÚNICA MUDANÇA
+    // Verifica se a localidade da denúncia existe na lista do agente antes de selecionar
+    if (den.localidade_id != null && _localidadesAgente.any((loc) => loc.id == den.localidade_id)) {
+      _selectedLocalidadeId = den.localidade_id;
+      // Dispara a mudança para preencher os campos de código/categoria, se necessário
+      _onLocalidadeChanged(den.localidade_id);
+    }
+
     _enderecoController.text = den.rua ?? '';
     _numeroController.text = den.numero ?? '';
     _complementoController.text = den.complemento ?? '';
     _currentLat = den.latitude;
     _currentLng = den.longitude;
+
+    // --- AQUI ESTÁ A CORREÇÃO, DENTRO DO MÉTODO ---
+    if (den.foto_url != null && den.foto_url!.isNotEmpty) {
+      _localImagePaths.add(den.foto_url!);
+    }
   }
 
   @override
@@ -251,7 +266,8 @@ class _RegistroOcorrenciaAgenteScreenState
       return;
     }
     setState(() => _isSaving = true);
-
+    final agentRepo = context.read<AgenteRepository>();
+    final currentAgent = await agentRepo.getCurrentAgent();
     final agentOcorrenciaService = context.read<AgentOcorrenciaService>();
 
     final dataAtividade =
@@ -260,7 +276,7 @@ class _RegistroOcorrenciaAgenteScreenState
 
     final ocorrenciaToSave = Ocorrencia(
       id: widget.ocorrencia?.id ?? const Uuid().v4(),
-      agente_id: context.read<AgenteRepository>().getCurrentAgent().toString(),
+      agente_id: currentAgent?.id,
       denuncia_id: widget.denunciaOrigem?.id,
       localidade_id: _selectedLocalidadeId,
       tipo_atividade: _tiposAtividade.toList(),
@@ -299,12 +315,15 @@ class _RegistroOcorrenciaAgenteScreenState
       latitude: _currentLat,
       longitude: _currentLng,
       created_at: widget.ocorrencia?.created_at ?? DateTime.now(),
-      localImagePaths: [
-        ..._localImagePaths,
-        ..._newlyAddedImages.map((f) => f.path)
-      ],
+
+      // --- INÍCIO DA CORREÇÃO ---
+      fotos_urls: _localImagePaths, // Fotos que já são URLs (da denúncia/edição)
+      localImagePaths: _newlyAddedImages.map((f) => f.path).toList(), // Fotos novas, do celular
       sincronizado: false,
+      // --- FIM DA CORREÇÃO ---
+
       municipio_id_ui: _municipioController.text,
+
       setor_id_ui: widget.ocorrencia?.setor_id_ui,
     );
 
@@ -584,6 +603,13 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   Widget _buildAddressSection({required bool isViewOnly}) {
+    // --- INÍCIO DA CORREÇÃO ---
+    // Garante que o valor selecionado para o dropdown seja válido ou nulo.
+    final isSelectedLocalidadeValid = _selectedLocalidadeId != null &&
+        _localidadesAgente.any((loc) => loc.id == _selectedLocalidadeId);
+    final dropdownValue = isSelectedLocalidadeValid ? _selectedLocalidadeId : null;
+    // --- FIM DA CORREÇÃO ---
+
     return _FormSection(
       children: [
         if (!isViewOnly) ...[
@@ -605,7 +631,8 @@ class _RegistroOcorrenciaAgenteScreenState
           runSpacing: 16,
           children: [
             DropdownButtonFormField<String>(
-              value: _selectedLocalidadeId,
+              value: dropdownValue, // <-- VALOR CORRIGIDO
+
               isExpanded: true,
               decoration: const InputDecoration(
                 labelText: 'Localidade*',
