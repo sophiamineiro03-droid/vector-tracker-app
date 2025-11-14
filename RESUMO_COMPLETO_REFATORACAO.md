@@ -201,6 +201,7 @@ lib/
 - [ ] Implementar paginação
 - [ ] Cache inteligente
 - [ ] Lazy loading
+- [ ] **LEMBRETE:** Revisar experiência da tela de splash no modo escuro (fundo branco pode causar "flash" desconfortável).
 
 ---
 
@@ -323,5 +324,6 @@ final list = await repo.fetchAllDenuncias();
 **Data:** $(date)  
 **Refatorado por:** AI Assistant (Claude)  
 **Para:** Vector Tracker App Team
+
 
 

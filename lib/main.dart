@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:get_it/get_it.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -22,8 +23,7 @@ import 'package:vector_tracker_app/screens/denuncia_screen.dart';
 import 'package:vector_tracker_app/screens/mapa_denuncias_screen.dart';
 import 'package:vector_tracker_app/screens/minhas_denuncias_screen.dart';
 import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
-
-late final DenunciaService denunciaService;
+import 'package:vector_tracker_app/screens/splash_screen.dart'; // Importa a nova tela de splash
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,39 +49,20 @@ Future<void> main() async {
 
     AppLogger.info('✓ Hive inicializado');
 
-    await ServiceLocator.setup();
+    // --- CORREÇÃO ---
+    // Apenas chamamos o setup, que já cuida de todos os registros.
+    ServiceLocator.setup();
     AppLogger.info('✓ Service Locator configurado');
 
   } catch (e, stackTrace) {
     AppLogger.error('Erro na inicialização principal', e, stackTrace);
-    AppLogger.warning('Iniciando em modo de fallback...');
-
-    await Supabase.initialize(
-      url: 'https://wcxiziyrjiqvhmxvpfga.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndjeGl6aXlyamlxdmhteHZwZmdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkyOTg2NDksImV4cCI6MjA3NDg3NDY0OX0.EGNXOT3IhSVLR41q5xE2JGx-gPahQpwkwsitH1wJVLY',
-    );
-
-    final appDocumentDir = await getApplicationDocumentsDirectory();
-    await Hive.initFlutter(appDocumentDir.path);
-
-    await Hive.openBox('denuncias_cache');
-    await Hive.openBox('pending_denuncias');
-    await Hive.openBox('localidades_cache');
-    await Hive.openBox('ocorrencias_cache');
-    await Hive.openBox('pending_ocorrencias');
-
-    await ServiceLocator.setup();
-    AppLogger.info('✓ Service Locator configurado no modo de fallback');
   }
-
-  denunciaService = ServiceLocator.get<DenunciaService>();
 
   runApp(
     MultiProvider(
       providers: [
-        // CORREÇÃO: Fornece o AgenteRepository para todo o app.
         Provider(create: (_) => ServiceLocator.get<AgenteRepository>()),
-        ChangeNotifierProvider.value(value: denunciaService),
+        ChangeNotifierProvider.value(value: GetIt.I.get<DenunciaService>()), 
         ChangeNotifierProvider(create: (_) => ServiceLocator.get<AgentOcorrenciaService>()),
       ],
       child: const MyApp(),
@@ -112,8 +93,9 @@ class MyApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const LoginScreen(),
+      home: const SplashScreen(), 
       routes: {
+        '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
         '/community_home': (context) => const CommunityHomeScreen(),
         '/agent_home': (context) => const AgentHomeScreen(),

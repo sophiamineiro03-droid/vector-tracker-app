@@ -86,7 +86,24 @@ class _RegistroOcorrenciaAgenteScreenState
   // --- Adicione estas linhas ---
   Denuncia? _denunciaContexto;
   bool _isLoadingContexto = false;
+// Keys for scrolling to invalid fields
+  final _municipioKey = GlobalKey();
+  final _dataAtividadeKey = GlobalKey();
+  final _numeroPITKey = GlobalKey();
+  final _localidadeKey = GlobalKey();
+  final _tipoParedeKey = GlobalKey();
+  final _tipoTetoKey = GlobalKey();
+  final _inseticidaKey = GlobalKey();
+  final _numBarbeirosIntraKey = GlobalKey();
+  final _numBarbeirosPeriKey = GlobalKey();
 
+  final _panelKeys = {
+    'atividade': GlobalKey(),
+    'domicilio': GlobalKey(),
+    'detalhes_domicilio': GlobalKey(),
+    'captura': GlobalKey(),
+    'borrifacao': GlobalKey(),
+  };
   final _dataAtividadeController = TextEditingController();
   final _numeroPITController = TextEditingController();
   final _municipioController = TextEditingController();
@@ -160,42 +177,42 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
 // --- O novo método vem logo depois ---
-Future<void> _fetchDenunciaContexto(String denunciaId) async {
-  setState(() => _isLoadingContexto = true);
-  try {
-    final denunciaService = context.read<DenunciaService>();
-    // Substitua a linha com erro por estas:
-    final response = await Supabase.instance.client
-        .from('denuncias')
-        .select('*, municipios!cidade(nome)')
-        .eq('id', denunciaId)
-        .single();
-    final denuncia = Denuncia.fromMap(response);
+  Future<void> _fetchDenunciaContexto(String denunciaId) async {
+    setState(() => _isLoadingContexto = true);
+    try {
+      final denunciaService = context.read<DenunciaService>();
+      // Substitua a linha com erro por estas:
+      final response = await Supabase.instance.client
+          .from('denuncias')
+          .select('*, municipios!cidade(nome)')
+          .eq('id', denunciaId)
+          .single();
+      final denuncia = Denuncia.fromMap(response);
 
-    if (denuncia != null && mounted) {
-      setState(() {
-        _denunciaContexto = denuncia;
-      });
-    }
-  } catch (e) {
-    if (kDebugMode) {
-      print("Erro ao buscar contexto da denúncia: $e");
-    }
-  } finally {
-    if (mounted) {
-      setState(() => _isLoadingContexto = false);
+      if (denuncia != null && mounted) {
+        setState(() {
+          _denunciaContexto = denuncia;
+        });
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print("Erro ao buscar contexto da denúncia: $e");
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingContexto = false);
+      }
     }
   }
-}
 
-void _onLocalidadeChanged(String? newId) {
-  if (newId == null) return;
-  setState(() {
-    _selectedLocalidadeId = newId;
-    _codigoLocalidadeController.clear();
-    _categoriaLocalidadeController.clear();
-  });
-}
+  void _onLocalidadeChanged(String? newId) {
+    if (newId == null) return;
+    setState(() {
+      _selectedLocalidadeId = newId;
+      _codigoLocalidadeController.clear();
+      _categoriaLocalidadeController.clear();
+    });
+  }
 
   void _populateFromOcorrencia(Ocorrencia oco) {
 // Apenas mude a condição do 'if'
@@ -295,7 +312,33 @@ void _onLocalidadeChanged(String? newId) {
   Future<void> _saveForm() async {
     if (_isViewMode) return;
 
+    // A validação do formulário é o gatilho.
     if (!_formKey.currentState!.validate()) {
+      // 1. Encontra a chave do primeiro campo que falhou na validação.
+      final errorFieldKey = _findFirstErrorFieldKey();
+      if (errorFieldKey != null) {
+        // 2. Encontra o painel ao qual o campo pertence.
+        final panelKey = _findPanelForField(errorFieldKey);
+
+        // 3. Força a expansão do painel que contém o erro.
+        setState(() {
+          _openPanelKey = panelKey;
+        });
+
+        // 4. Aguarda a UI redesenhar e então rola a tela até o campo.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final context = errorFieldKey.currentContext;
+          if (context != null) {
+            Scrollable.ensureVisible(context,
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeInOut,
+              alignment: 0.3, // Alinha o campo um pouco abaixo do topo da tela.
+            );
+          }
+        });
+      }
+
+      // Mostra a mensagem de erro.
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content: Text('Por favor, corrija os erros em vermelho.'),
@@ -303,6 +346,8 @@ void _onLocalidadeChanged(String? newId) {
       );
       return;
     }
+
+    // O restante do seu código para salvar os dados continua aqui, sem alterações.
     setState(() => _isSaving = true);
     final agentRepo = context.read<AgenteRepository>();
     final currentAgent = await agentRepo.getCurrentAgent();
@@ -336,48 +381,40 @@ void _onLocalidadeChanged(String? newId) {
       vestigios_intradomicilio: _vestigiosIntra['Nenhum']!
           ? 'Nenhum'
           : _vestigiosIntra.keys
-              .where((k) => k != 'Nenhum' && _vestigiosIntra[k]!)
-              .join(', '),
+          .where((k) => k != 'Nenhum' && _vestigiosIntra[k]!)
+          .join(', '),
       barbeiros_intradomicilio:
-          int.tryParse(_numBarbeirosIntraController.text) ?? 0,
+      int.tryParse(_numBarbeirosIntraController.text) ?? 0,
       vestigios_peridomicilio: _vestigiosPeri['Nenhum']!
           ? 'Nenhum'
           : _vestigiosPeri.keys
-              .where((k) => k != 'Nenhum' && _vestigiosPeri[k]!)
-              .join(', '),
+          .where((k) => k != 'Nenhum' && _vestigiosPeri[k]!)
+          .join(', '),
       barbeiros_peridomicilio:
-          int.tryParse(_numBarbeirosPeriController.text) ?? 0,
+      int.tryParse(_numBarbeirosPeriController.text) ?? 0,
       inseticida: _inseticidaController.text,
       numero_cargas: int.tryParse(_numCargasController.text) ?? 0,
       codigo_etiqueta: _codigoEtiquetaController.text,
       latitude: _currentLat,
       longitude: _currentLng,
       created_at: widget.ocorrencia?.created_at ?? DateTime.now(),
-
-      // --- INÍCIO DA CORREÇÃO ---
-      fotos_urls: _localImagePaths, // Fotos que já são URLs (da denúncia/edição)
-      localImagePaths: _newlyAddedImages.map((f) => f.path).toList(), // Fotos novas, do celular
+      fotos_urls: _localImagePaths,
+      localImagePaths: _newlyAddedImages.map((f) => f.path).toList(),
       sincronizado: false,
-      // --- FIM DA CORREÇÃO ---
-
       municipio_id_ui: _municipioController.text,
-
       setor_id_ui: widget.ocorrencia?.setor_id_ui,
     );
 
     try {
       await agentOcorrenciaService.saveOcorrencia(ocorrenciaToSave);
 
-      // --- INÍCIO DA NOVA LÓGICA ---
-      // Se esta ocorrência veio de uma denúncia, atualiza o status dela para 'atendida'.
       if (ocorrenciaToSave.denuncia_id != null) {
         final denunciaService = context.read<DenunciaService>();
         await denunciaService.updateDenunciaStatus(
           ocorrenciaToSave.denuncia_id!,
-          'atendida', // ou 'concluida', o status que você usa no seu banco
+          'atendida',
         );
       }
-      // --- FIM DA NOVA LÓGICA ---
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -396,83 +433,121 @@ void _onLocalidadeChanged(String? newId) {
       if (mounted) setState(() => _isSaving = false);
     }
   }
+  GlobalKey? _findFirstErrorFieldKey() {
+    // A validação do Form já foi executada, então aqui só verificamos a condição
+    // de cada campo na ordem em que aparecem na tela para encontrar o primeiro erro.
+    if ((_municipioController.text.isEmpty)) return _municipioKey;
+    if ((_dataAtividadeController.text.isEmpty)) return _dataAtividadeKey;
+    if (_tiposAtividade.contains(TipoAtividade.atendimentoPIT) && _numeroPITController.text.isEmpty) return _numeroPITKey;
+    if (_selectedLocalidadeId == null) return _localidadeKey;
+    if (_tipoParede == null) return _tipoParedeKey;
+    if (_tipoTeto == null) return _tipoTetoKey;
+    if (_tiposAtividade.contains(TipoAtividade.borrifacao) && _inseticidaController.text.isEmpty) return _inseticidaKey;
+    if (_capturaIntraStatus == CapturaStatus.triatomineo && (int.tryParse(_numBarbeirosIntraController.text) ?? 0) == 0) return _numBarbeirosIntraKey;
+    if (_capturaPeriStatus == CapturaStatus.triatomineo && (int.tryParse(_numBarbeirosPeriController.text) ?? 0) == 0) return _numBarbeirosPeriKey;
 
+    return null;
+  }
+
+  String? _findPanelForField(GlobalKey fieldKey) {
+    // Mapeia a chave de um campo para a chave do painel que o contém.
+    if (fieldKey == _dataAtividadeKey || fieldKey == _numeroPITKey) {
+      return 'atividade';
+    }
+    if (fieldKey == _localidadeKey) {
+      return 'domicilio';
+    }
+    if (fieldKey == _tipoParedeKey || fieldKey == _tipoTetoKey) {
+      return 'detalhes_domicilio';
+    }
+    if (fieldKey == _numBarbeirosIntraKey || fieldKey == _numBarbeirosPeriKey) {
+      return 'captura';
+    }
+    if (fieldKey == _inseticidaKey) {
+      return 'borrifacao';
+    }
+    // Se não estiver em um painel (como o campo município), retorna o painel aberto no momento.
+    return _openPanelKey;
+  }
+  //====================== ATÉ AQUI ======================
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final titleStyle =
-        theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold);
+    theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold);
 
     return Scaffold(
       appBar: GradientAppBar(
         title: widget.denunciaOrigem != null
             ? 'Atender Denúncia'
             : (_isNew
-                ? 'Novo Registro Proativo'
-                : (_isViewMode ? 'Detalhes da Visita' : 'Editar Visita')),
+            ? 'Novo Registro Proativo'
+            : (_isViewMode ? 'Detalhes da Visita' : 'Editar Visita')),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Form(
-              key: _formKey,
-              child: SafeArea(
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: SingleChildScrollView(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // Se estiver ATENDENDO uma nova denúncia, mostra o card
-                            if (widget.denunciaOrigem != null) ...[
-                              _buildDenunciaContextCard(widget.denunciaOrigem!),
-                              const SizedBox(height: 24),
-                            ]
+        key: _formKey,
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Se estiver ATENDENDO uma nova denúncia, mostra o card
+                      if (widget.denunciaOrigem != null) ...[
+                        _buildDenunciaContextCard(widget.denunciaOrigem!),
+                        const SizedBox(height: 24),
+                      ]
 // Se estiver EDITANDO e o contexto já foi carregado, mostra o card
-                            else if (_denunciaContexto != null) ...[
-                              _buildDenunciaContextCard(_denunciaContexto!),
-                              const SizedBox(height: 24),
-                            ]
+                      else if (_denunciaContexto != null) ...[
+                        _buildDenunciaContextCard(_denunciaContexto!),
+                        const SizedBox(height: 24),
+                      ]
 // Se estiver carregando o contexto, mostra um indicador
-                            else if (_isLoadingContexto) ...[
-                                const Center(
-                                    child: Padding(
-                                      padding: EdgeInsets.all(16.0),
-                                      child: CircularProgressIndicator(),
-                                    )),
-                                const SizedBox(height: 24),
-                              ],
-                            TextFormField(
-                              controller: _municipioController,
-                              readOnly: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Município',
-                                border: OutlineInputBorder(),
-                                filled: true,
-                                fillColor: Colors.black12,
-                              ),
-                              validator: (v) => (v == null || v.isEmpty)
-                                  ? 'Campo obrigatório'
-                                  : null,
-                            ),
-                            const SizedBox(height: 16),
-                            _buildExpansionPanelList(context, titleStyle),
-                          ],
+                      else if (_isLoadingContexto) ...[
+                          const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(16.0),
+                                child: CircularProgressIndicator(),
+                              )),
+                          const SizedBox(height: 24),
+                        ],
+                      TextFormField(
+                        key: _municipioKey, // <<<<<<<<<<< ADICIONE ESTA LINHA
+                        controller: _municipioController,
+                        readOnly: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Município',
+                          //...
+                          border: OutlineInputBorder(),
+                          filled: true,
+                          fillColor: Colors.black12,
                         ),
+                        validator: (v) => (v == null || v.isEmpty)
+                            ? 'Campo obrigatório'
+                            : null,
                       ),
-                    ),
-                    if (!_isViewMode) _buildSaveButton(theme),
-                  ],
+                      const SizedBox(height: 16),
+                      _buildExpansionPanelList(context, titleStyle),
+                    ],
+                  ),
                 ),
               ),
-            ),
+              if (!_isViewMode) _buildSaveButton(theme),
+            ],
+          ),
+        ),
+      ),
       floatingActionButton: _isViewMode
           ? FloatingActionButton.extended(
-              onPressed: () => setState(() => _isViewMode = false),
-              label: const Text('Editar'),
-              icon: const Icon(Icons.edit),
-            )
+        onPressed: () => setState(() => _isViewMode = false),
+        label: const Text('Editar'),
+        icon: const Icon(Icons.edit),
+      )
           : null,
     );
   }
@@ -548,9 +623,7 @@ void _onLocalidadeChanged(String? newId) {
   }
 
   Widget _buildExpansionPanelList(BuildContext context, TextStyle? titleStyle) {
-    final isViewOnly = _isViewMode;
-
-    final List<_FormPanelItem> panelItems = [
+    final isViewOnly = _isViewMode;final List<_FormPanelItem> panelItems = [
       _FormPanelItem(
           key: 'atividade',
           header: '1. Dados da Atividade',
@@ -579,24 +652,24 @@ void _onLocalidadeChanged(String? newId) {
       _FormPanelItem(
           key: 'fotos',
           header: '7. Fotos',
-          body: _buildImageSection(isViewOnly: isViewOnly)),
+          body: _buildImageSection(isViewOnly: isViewOnly)), // <<<<<< CORREÇÃO AQUI
       _FormPanelItem(
           key: 'agente',
           header: '8. Agente Responsável',
           body: _buildAgentSection()),
     ];
 
-    return ExpansionPanelList.radio(
-      initialOpenPanelValue: _openPanelKey,
+    // A mudança está aqui: Usamos `ExpansionPanelList` em vez de `ExpansionPanelList.radio`
+    return ExpansionPanelList(
       expansionCallback: (int index, bool isExpanded) {
         setState(() {
-          _openPanelKey = isExpanded ? null : panelItems[index].key;
+          // Se um painel for expandido, seu 'key' é guardado. Se for fechado, a 'key' é limpa.
+          // Isso garante que apenas um painel fique aberto por vez.
+          _openPanelKey = isExpanded ? panelItems[index].key : null;
         });
       },
-      children: panelItems.map<ExpansionPanelRadio>((item) {
-        return ExpansionPanelRadio(
-          value: item.key,
-          canTapOnHeader: true,
+      children: panelItems.map<ExpansionPanel>((item) {
+        return ExpansionPanel(
           headerBuilder: (context, isExpanded) {
             return Padding(
               padding: const EdgeInsets.all(16.0),
@@ -607,11 +680,14 @@ void _onLocalidadeChanged(String? newId) {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
             child: item.body,
           ),
+          // Esta é a linha mais importante: ela diz qual painel deve estar expandido
+          // baseado na variável `_openPanelKey` que mudamos no `_saveForm`.
+          isExpanded: _openPanelKey == item.key,
+          canTapOnHeader: true,
         );
       }).toList(),
     );
   }
-
   Widget _buildActivitySection({required bool isViewOnly}) {
     return _FormSection(
       children: [
@@ -623,14 +699,14 @@ void _onLocalidadeChanged(String? newId) {
             onChanged: isViewOnly
                 ? null
                 : (bool? selected) {
-                    setState(() {
-                      if (selected == true) {
-                        _tiposAtividade.add(tipo);
-                      } else {
-                        _tiposAtividade.remove(tipo);
-                      }
-                    });
-                  },
+              setState(() {
+                if (selected == true) {
+                  _tiposAtividade.add(tipo);
+                } else {
+                  _tiposAtividade.remove(tipo);
+                }
+              });
+            },
           );
         }).toList(),
         const SizedBox(height: 16),
@@ -643,7 +719,7 @@ void _onLocalidadeChanged(String? newId) {
           readOnly: true,
           onTap: isViewOnly ? null : _selectDate,
           validator: (v) =>
-              (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
+          (v == null || v.isEmpty) ? 'Campo obrigatório' : null,
         ),
         if (_tiposAtividade.contains(TipoAtividade.atendimentoPIT)) ...[
           const SizedBox(height: 16),
@@ -658,10 +734,10 @@ void _onLocalidadeChanged(String? newId) {
             ),
             keyboardType: TextInputType.number,
             validator: (v) =>
-                (_tiposAtividade.contains(TipoAtividade.atendimentoPIT) &&
-                        (v == null || v.isEmpty))
-                    ? 'Campo obrigatório'
-                    : null,
+            (_tiposAtividade.contains(TipoAtividade.atendimentoPIT) &&
+                (v == null || v.isEmpty))
+                ? 'Campo obrigatório'
+                : null,
           ),
         ],
       ],
@@ -682,13 +758,13 @@ void _onLocalidadeChanged(String? newId) {
           OutlinedButton.icon(
             icon: _isGettingLocation
                 ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.my_location),
             label: const Text('Usar Minha Localização'),
             onPressed:
-                _isGettingLocation ? null : _getCurrentLocationAndFillAddress,
+            _isGettingLocation ? null : _getCurrentLocationAndFillAddress,
           ),
           const SizedBox(height: 16),
         ],
@@ -779,10 +855,10 @@ void _onLocalidadeChanged(String? newId) {
     return _FormSection(
       children: [
         _buildPendencySection('Pendência da Pesquisa', _pendenciaPesquisa,
-            (v) => setState(() => _pendenciaPesquisa = v), isViewOnly),
+                (v) => setState(() => _pendenciaPesquisa = v), isViewOnly),
         const Divider(height: 32),
         _buildPendencySection('Pendência da Borrifação', _pendenciaBorrifacao,
-            (v) => setState(() => _pendenciaBorrifacao = v), isViewOnly),
+                (v) => setState(() => _pendenciaBorrifacao = v), isViewOnly),
         const Divider(height: 32),
         TextFormField(
             controller: _nomeMoradorController,
@@ -800,7 +876,7 @@ void _onLocalidadeChanged(String? newId) {
                   onSelected: isViewOnly
                       ? null
                       : (bool selected) =>
-                          setState(() => _numeroAnexo = selected ? index : null));
+                      setState(() => _numeroAnexo = selected ? index : null));
             })),
         const Divider(height: 32),
         _buildFieldLabel(context, 'Situação do Imóvel*'),
@@ -809,7 +885,7 @@ void _onLocalidadeChanged(String? newId) {
             value: s,
             groupValue: _situacaoImovel,
             onChanged:
-                isViewOnly ? null : (v) => setState(() => _situacaoImovel = v))),
+            isViewOnly ? null : (v) => setState(() => _situacaoImovel = v))),
         const Divider(height: 32),
         DropdownButtonFormField<String>(
           value: _tipoParede,
@@ -863,12 +939,12 @@ void _onLocalidadeChanged(String? newId) {
       children: [
         _buildFieldLabel(context, title),
         ...Pendencia.values.map((p) => RadioListTile<Pendencia>(
-              title: Text(formatEnumName(p.name)),
-              value: p,
-              groupValue: groupValue,
-              onChanged: isViewOnly ? null : onChanged,
-              contentPadding: EdgeInsets.zero,
-            )),
+          title: Text(formatEnumName(p.name)),
+          value: p,
+          groupValue: groupValue,
+          onChanged: isViewOnly ? null : onChanged,
+          contentPadding: EdgeInsets.zero,
+        )),
       ],
     );
   }
@@ -922,20 +998,20 @@ void _onLocalidadeChanged(String? newId) {
       children: [
         _buildFieldLabel(context, title),
         ...CapturaStatus.values.map((s) => RadioListTile<CapturaStatus>(
-              title: Text(formatEnumName(s.name)),
-              value: s,
-              groupValue: status,
-              onChanged: isViewOnly ? null : onStatusChanged,
-            )),
+          title: Text(formatEnumName(s.name)),
+          value: s,
+          groupValue: status,
+          onChanged: isViewOnly ? null : onStatusChanged,
+        )),
         const SizedBox(height: 16),
         _buildFieldLabel(context, 'Vestígios Encontrados'),
         ...vestigios.keys.map((key) => CheckboxListTile(
-              title: Text(key),
-              value: vestigios[key],
-              onChanged: isViewOnly
-                  ? null
-                  : (val) => _handleVestigiosChange(vestigios, key, val!),
-            )),
+          title: Text(key),
+          value: vestigios[key],
+          onChanged: isViewOnly
+              ? null
+              : (val) => _handleVestigiosChange(vestigios, key, val!),
+        )),
         if (isTriatomineo) ...[
           const SizedBox(height: 16),
           TextFormField(
@@ -971,9 +1047,9 @@ void _onLocalidadeChanged(String? newId) {
         if (allImages.isEmpty)
           const Center(
               child: Padding(
-            padding: EdgeInsets.symmetric(vertical: 24.0),
-            child: Text('Nenhuma foto adicionada.'),
-          )),
+                padding: EdgeInsets.symmetric(vertical: 24.0),
+                child: Text('Nenhuma foto adicionada.'),
+              )),
         if (allImages.isNotEmpty)
           GridView.builder(
             shrinkWrap: true,
@@ -1074,7 +1150,7 @@ void _onLocalidadeChanged(String? newId) {
               onSelected: isViewOnly
                   ? null
                   : (bool selected) => setState(() => _numCargasController
-                      .text = selected ? index.toString() : '0'),
+                  .text = selected ? index.toString() : '0'),
             );
           }),
         ),
@@ -1116,8 +1192,8 @@ void _onLocalidadeChanged(String? newId) {
     final pickedDate = await showDatePicker(
       context: context,
       initialDate:
-          DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ??
-              DateTime.now(),
+      DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ??
+          DateTime.now(),
       firstDate: DateTime(2000),
       lastDate: DateTime.now(),
     );
@@ -1161,7 +1237,7 @@ void _onLocalidadeChanged(String? newId) {
     final picker = ImagePicker();
     try {
       final pickedFile =
-          await picker.pickImage(source: source, imageQuality: 80);
+      await picker.pickImage(source: source, imageQuality: 80);
       if (pickedFile != null) {
         setState(() {
           _newlyAddedImages.add(pickedFile);
@@ -1256,10 +1332,10 @@ void _onLocalidadeChanged(String? newId) {
         ),
         child: _isSaving
             ? const SizedBox(
-                height: 24,
-                width: 24,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 3))
+            height: 24,
+            width: 24,
+            child: CircularProgressIndicator(
+                color: Colors.white, strokeWidth: 3))
             : Text(_isNew ? 'Salvar Registro' : 'Salvar Alterações'),
       ),
     );

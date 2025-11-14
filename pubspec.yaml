@@ -1,7 +1,6 @@
 name: vector_tracker_app
 description: "A new Flutter project."
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -11,34 +10,44 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
-  google_fonts: ^6.1.0
+  google_fonts: ^6.2.1
+  flutter_dotenv: ^5.1.0
   supabase_flutter: ^2.5.3
-  provider: ^6.1.1
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
-  path_provider: ^2.1.2
-  image_picker: ^1.0.7
+  provider: ^6.1.2
+  get_it: ^7.6.7
+  shared_preferences: ^2.2.3
+  image_picker: ^1.1.2
   geolocator: ^11.0.0
   geocoding: ^3.0.0
-  uuid: ^4.3.3
-  intl: ^0.19.0
+  google_maps_flutter: ^2.6.1
+  vector_math: ^2.1.4
+  permission_handler: ^11.3.1
+  http: ^1.2.1
   connectivity_plus: ^5.0.2
-  flutter_dotenv: ^5.1.0
-  google_maps_flutter: ^2.6.0
-  get_it: ^7.6.7
-  logger: ^2.3.0
-  google_maps_cluster_manager_2: ^3.1.0
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.3
+  uuid: ^4.4.0
+  intl: ^0.19.0
+  google_maps_cluster_manager_2: ^3.2.0
+  logger: ^2.4.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
-  hive_generator: ^2.0.1
-  build_runner: ^2.4.8
+  flutter_native_splash: ^2.4.0
 
 flutter:
   uses-material-design: true
   assets:
     - .env
     - assets/
-    - assets/images/
+
+# Configuração da "mágica" para usar a imagem que VOCÊ mandou
+flutter_native_splash:
+  color: "#FFFFFF"
+  image: assets/white_splash.png
+  android: true
+  ios: true
+  web: false
