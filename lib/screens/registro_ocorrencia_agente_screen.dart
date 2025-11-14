@@ -225,7 +225,8 @@ class _RegistroOcorrenciaAgenteScreenState
     _currentLat = oco.latitude;
     _currentLng = oco.longitude;
     _numeroPITController.text = oco.numero_pit ?? '';
-    _municipioController.text = oco.municipio_id_ui ?? '';
+    _municipioController.text = oco.municipioNome ?? oco.municipio_id_ui ?? '';
+
 
     if (oco.localidade_id != null) {
       _selectedLocalidadeId = oco.localidade_id;

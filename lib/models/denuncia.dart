@@ -127,7 +127,7 @@ class Denuncia {
       status: map['status'],
 
       // O Supabase retornará um mapa chamado 'municipios' com os dados do JOIN.
-      municipioNome: extrairNome(map['municipios']), 
+      municipioNome: extrairNome(map['localidades']?['municipios']),
       localidadeNome: extrairNome(map['localidades']),
     );
   }

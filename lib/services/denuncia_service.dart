@@ -36,6 +36,9 @@ class DenunciaService with ChangeNotifier {
 
   bool _isSyncing = false;
 
+  // GUARDA O FILTRO ATUAL PARA REUTILIZAR NAS ATUALIZAÇÕES AUTOMÁTICAS
+  List<String>? _currentLocalidadeIdsFilter;
+
   DenunciaService() {
     _listenToConnectivity();
   }
@@ -75,30 +78,25 @@ class DenunciaService with ChangeNotifier {
         final denunciaMap = Map<String, dynamic>.from(denunciaData as Map);
         final id = denunciaMap['id'];
 
-        // --- INÍCIO DA LÓGICA DE UPLOAD ---
         final localPhotoPath = denunciaMap['foto_url'];
 
-        // Verifica se é um caminho local e não uma URL da web
         if (localPhotoPath != null && !localPhotoPath.startsWith('http')) {
           final file = File(localPhotoPath);
           if (await file.exists()) {
             final fileName = localPhotoPath.split('/').last;
             final filePath = '$id/$fileName';
 
-            // Faz o upload para o bucket correto
             await _supabase.storage.from('imagens_denuncias').upload(
               filePath,
               file,
               fileOptions: const FileOptions(cacheControl: '3600', upsert: false),
             );
 
-            // Obtém a URL pública e atualiza o mapa
             final publicUrl = _supabase.storage.from('imagens_denuncias').getPublicUrl(filePath);
             denunciaMap['foto_url'] = publicUrl;
             AppLogger.sync('Upload da foto $filePath realizado com sucesso.');
           }
         }
-        // --- FIM DA LÓGICA DE UPLOAD ---
 
         await _supabase.from('denuncias').upsert(denunciaMap);
         await _pendingDenunciasBox.delete(id);
@@ -113,9 +111,16 @@ class DenunciaService with ChangeNotifier {
     await fetchItems();
   }
 
-  Future<void> fetchItems() async {
+  Future<void> fetchItems({List<String>? localidadeIds}) async {
     _isLoading = true;
     notifyListeners();
+
+    // Se um novo filtro for fornecido, ele se torna o filtro principal.
+    if (localidadeIds != null) {
+      _currentLocalidadeIdsFilter = localidadeIds;
+    }
+    // A busca SEMPRE usará o último filtro aplicado.
+    final filterToUse = _currentLocalidadeIdsFilter;
 
     try {
       final List<Map<String, dynamic>> allItems = [];
@@ -136,11 +141,21 @@ class DenunciaService with ChangeNotifier {
           connectivityResult == ConnectivityResult.wifi;
 
       if (isOnline) {
-        final response = await _supabase.from('denuncias').select(
-            '*, municipios!cidade(nome), localidades!localidade_id(nome)');
+        // CORREÇÃO: Consulta explícita para garantir a estrutura de dados correta.
+        var query = _supabase
+            .from('denuncias')
+            .select('*, localidades!inner(nome, municipios!inner(nome))');
+
+        if (filterToUse != null && filterToUse.isNotEmpty) {
+          query = query.inFilter('localidade_id', filterToUse);
+        }
+
+        // ...
+        final response = await query;
         final remoteItems = List<Map<String, dynamic>>.from(response);
 
         await _denunciasCache.clear();
+// ...
         for (var item in remoteItems) {
           _denunciasCache.put(item['id'], item);
         }
@@ -169,16 +184,14 @@ class DenunciaService with ChangeNotifier {
     await fetchItems();
     syncPendingDenuncias();
   }
-  // --- Adicione este novo método ---
+  
   Future<void> updateDenunciaStatus(String denunciaId, String novoStatus) async {
     try {
-      // Atualiza o status no Supabase
       await _supabase
           .from('denuncias')
           .update({'status': novoStatus})
           .eq('id', denunciaId);
 
-      // Atualiza o cache local para refletir a mudança imediatamente
       final cachedDenuncia = _denunciasCache.get(denunciaId);
       if (cachedDenuncia != null) {
         final denunciaMap = Map<String, dynamic>.from(cachedDenuncia as Map);
@@ -186,16 +199,15 @@ class DenunciaService with ChangeNotifier {
         await _denunciasCache.put(denunciaId, denunciaMap);
       }
 
-      // Força a atualização da lista na UI
+      // Força a atualização da lista, agora usando o filtro que já está guardado.
       await fetchItems();
 
       AppLogger.info('Status da denúncia $denunciaId atualizado para $novoStatus');
     } catch (e, s) {
       AppLogger.error('Erro ao atualizar status da denúncia $denunciaId', e, s);
-      // Opcional: Lançar o erro para a UI tratar, se necessário
-      // throw Exception('Não foi possível atualizar o status da denúncia.');
     }
   }
+
   Future<void> fetchMunicipios() async {
     _isMunicipiosLoading = true;
     notifyListeners();
@@ -213,7 +225,7 @@ class DenunciaService with ChangeNotifier {
 
   Future<void> fetchLocalidades(String municipioId) async {
     _isLocalidadesLoading = true;
-    _localidades = []; // Limpa a lista antes de buscar novas
+    _localidades = [];
     notifyListeners();
 
     try {

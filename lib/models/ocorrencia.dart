@@ -30,13 +30,14 @@ class Ocorrencia {
   final String? inseticida;
   final int? numero_cargas;
   final String? codigo_etiqueta;
-  final List<String>? localImagePaths; 
+  final List<String>? localImagePaths;
   final List<String>? fotos_urls;
   final DateTime? created_at;
   final bool sincronizado;
 
   // Campos que existem APENAS no App, não no banco de dados
   final String? municipio_id_ui;
+  final String? municipioNome; // <<<< ADICIONADO
   final String? localidade_ui;
   final String? setor_id_ui;
 
@@ -75,22 +76,38 @@ class Ocorrencia {
     this.created_at,
     required this.sincronizado,
     this.municipio_id_ui,
+    this.municipioNome, // <<<< ADICIONADO
     this.localidade_ui,
     this.setor_id_ui,
   });
 
   factory Ocorrencia.fromMap(Map<String, dynamic> map) {
+    String? extractedMunicipioNome;
+    // Lógica para extrair o nome do município de um join com localidades e municípios
+    if (map['localidades'] != null && map['localidades'] is Map<String, dynamic>) {
+      final localidadesData = map['localidades'] as Map<String, dynamic>;
+      if (localidadesData['municipios'] != null &&
+          localidadesData['municipios'] is Map<String, dynamic>) {
+        final municipiosData = localidadesData['municipios'] as Map<String, dynamic>;
+        extractedMunicipioNome = municipiosData['nome'];
+      }
+    }
+
     return Ocorrencia(
       id: map['id'] ?? '',
       agente_id: map['agente_id'],
       denuncia_id: map['denuncia_id'],
       localidade_id: map['localidade_id'],
+      municipioNome: extractedMunicipioNome, // <<<< ADICIONADO
       tipo_atividade: map['tipo_atividade'] is List
           ? (map['tipo_atividade'] as List)
-              .map((e) => TipoAtividade.values.firstWhere((v) => v.name == e, orElse: () => TipoAtividade.pesquisa))
+              .map((e) => TipoAtividade.values.firstWhere((v) => v.name == e,
+                  orElse: () => TipoAtividade.pesquisa))
               .toList()
           : [],
-      data_atividade: map['data_atividade'] != null ? DateTime.parse(map['data_atividade']) : null,
+      data_atividade: map['data_atividade'] != null
+          ? DateTime.parse(map['data_atividade'])
+          : null,
       numero_pit: map['numero_pit'],
       endereco: map['endereco'],
       numero: map['numero'],
@@ -99,11 +116,20 @@ class Ocorrencia {
       longitude: map['longitude'],
       codigo_localidade: map['codigo_localidade'],
       categoria_localidade: map['categoria_localidade'],
-      pendencia_pesquisa: map['pendencia_pesquisa'] != null ? Pendencia.values.firstWhere((e) => e.name == map['pendencia_pesquisa']) : null,
-      pendencia_borrifacao: map['pendencia_borrifacao'] != null ? Pendencia.values.firstWhere((e) => e.name == map['pendencia_borrifacao']) : null,
+      pendencia_pesquisa: map['pendencia_pesquisa'] != null
+          ? Pendencia.values
+              .firstWhere((e) => e.name == map['pendencia_pesquisa'])
+          : null,
+      pendencia_borrifacao: map['pendencia_borrifacao'] != null
+          ? Pendencia.values
+              .firstWhere((e) => e.name == map['pendencia_borrifacao'])
+          : null,
       nome_morador: map['nome_morador'],
       numero_anexo: map['numero_anexo'],
-      situacao_imovel: map['situacao_imovel'] != null ? SituacaoImovel.values.firstWhere((e) => e.name == map['situacao_imovel']) : null,
+      situacao_imovel: map['situacao_imovel'] != null
+          ? SituacaoImovel.values
+              .firstWhere((e) => e.name == map['situacao_imovel'])
+          : null,
       tipo_parede: map['tipo_parede'],
       tipo_teto: map['tipo_teto'],
       melhoria_habitacional: map['melhoria_habitacional'],
@@ -114,9 +140,15 @@ class Ocorrencia {
       inseticida: map['inseticida'],
       numero_cargas: map['numero_cargas'],
       codigo_etiqueta: map['codigo_etiqueta'],
-      localImagePaths: map['localImagePaths'] != null ? List<String>.from(map['localImagePaths']) : [],
-      fotos_urls: map['fotos_urls'] != null ? List<String>.from(map['fotos_urls']) : [],
-      created_at: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
+      localImagePaths: map['localImagePaths'] != null
+          ? List<String>.from(map['localImagePaths'])
+          : [],
+      fotos_urls: map['fotos_urls'] != null
+          ? List<String>.from(map['fotos_urls'])
+          : [],
+      created_at: map['created_at'] != null
+          ? DateTime.parse(map['created_at'])
+          : null,
       sincronizado: map['sincronizado'] ?? false,
       municipio_id_ui: map['municipio_id_ui'],
       localidade_ui: map['localidade_ui'],
@@ -196,6 +228,7 @@ class Ocorrencia {
     DateTime? created_at,
     bool? sincronizado,
     String? municipio_id_ui,
+    String? municipioNome, // <<<< ADICIONADO
     String? localidade_ui,
     String? setor_id_ui,
   }) {
@@ -221,11 +254,16 @@ class Ocorrencia {
       situacao_imovel: situacao_imovel ?? this.situacao_imovel,
       tipo_parede: tipo_parede ?? this.tipo_parede,
       tipo_teto: tipo_teto ?? this.tipo_teto,
-      melhoria_habitacional: melhoria_habitacional ?? this.melhoria_habitacional,
-      vestigios_intradomicilio: vestigios_intradomicilio ?? this.vestigios_intradomicilio,
-      barbeiros_intradomicilio: barbeiros_intradomicilio ?? this.barbeiros_intradomicilio,
-      vestigios_peridomicilio: vestigios_peridomicilio ?? this.vestigios_peridomicilio,
-      barbeiros_peridomicilio: barbeiros_peridomicilio ?? this.barbeiros_peridomicilio,
+      melhoria_habitacional:
+          melhoria_habitacional ?? this.melhoria_habitacional,
+      vestigios_intradomicilio:
+          vestigios_intradomicilio ?? this.vestigios_intradomicilio,
+      barbeiros_intradomicilio:
+          barbeiros_intradomicilio ?? this.barbeiros_intradomicilio,
+      vestigios_peridomicilio:
+          vestigios_peridomicilio ?? this.vestigios_peridomicilio,
+      barbeiros_peridomicilio:
+          barbeiros_peridomicilio ?? this.barbeiros_peridomicilio,
       inseticida: inseticida ?? this.inseticida,
       numero_cargas: numero_cargas ?? this.numero_cargas,
       codigo_etiqueta: codigo_etiqueta ?? this.codigo_etiqueta,
@@ -234,6 +272,7 @@ class Ocorrencia {
       created_at: created_at ?? this.created_at,
       sincronizado: sincronizado ?? this.sincronizado,
       municipio_id_ui: municipio_id_ui ?? this.municipio_id_ui,
+      municipioNome: municipioNome ?? this.municipioNome, // <<<< ADICIONADO
       localidade_ui: localidade_ui ?? this.localidade_ui,
       setor_id_ui: setor_id_ui ?? this.setor_id_ui,
     );

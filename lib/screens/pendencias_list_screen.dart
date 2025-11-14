@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
+import 'package:vector_tracker_app/repositories/agente_repository.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 import 'package:intl/intl.dart';
@@ -21,9 +22,21 @@ class _PendenciasListScreenState extends State<PendenciasListScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<DenunciaService>(context, listen: false).fetchItems();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final agente = await Provider.of<AgenteRepository>(context, listen: false).getCurrentAgent();
+      final localidadeIds = agente?.localidades.map((loc) => loc.id).toList();
+      if(mounted){
+         Provider.of<DenunciaService>(context, listen: false).fetchItems(localidadeIds: localidadeIds);
+      }
     });
+  }
+
+  Future<void> _handleRefresh() async{
+    final agente = await Provider.of<AgenteRepository>(context, listen: false).getCurrentAgent();
+    final localidadeIds = agente?.localidades.map((loc) => loc.id).toList();
+     if(mounted){
+       Provider.of<DenunciaService>(context, listen: false).fetchItems(localidadeIds: localidadeIds);
+    }
   }
 
   @override
@@ -32,16 +45,16 @@ class _PendenciasListScreenState extends State<PendenciasListScreen> {
     return Consumer<DenunciaService>(
       builder: (context, denunciaService, child) {
         
+        // CORRIGIDO: A verificação de status agora ignora maiúsculas/minúsculas.
         final pendencias = denunciaService.items
-            .where((d) => d['status'] != 'Atendida')
+            .where((d) => (d['status'] as String?)?.toLowerCase() != 'atendida')
             .map((item) => Denuncia.fromMap(item))
             .toList();
 
         return Scaffold(
           appBar: const GradientAppBar(title: 'Pendências da Localidade'),
           body: RefreshIndicator(
-            // CORRIGIDO: O parâmetro 'force' foi removido.
-            onRefresh: () => denunciaService.fetchItems(),
+            onRefresh: _handleRefresh,
             child: denunciaService.isLoading && pendencias.isEmpty
                 ? const Center(child: CircularProgressIndicator())
                 : (pendencias.isEmpty
@@ -64,7 +77,6 @@ class _PendenciasListScreenState extends State<PendenciasListScreen> {
                         subtitle: Text('Registrado em: ${denuncia.createdAt != null ? DateFormat('dd/MM/yyyy').format(denuncia.createdAt!) : 'Data indisponível'}'),
                         trailing: const Icon(Icons.arrow_forward_ios),
                         onTap: () {
-                          // A navegação aqui agora leva para a tela correta, com o seu layout.
                           Navigator.of(context).push(
                              MaterialPageRoute(
                                builder: (context) => RegistroOcorrenciaAgenteScreen(
