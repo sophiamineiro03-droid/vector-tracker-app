@@ -8,8 +8,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:vector_tracker_app/core/app_config.dart';
 import 'package:vector_tracker_app/core/app_logger.dart';
 import 'package:vector_tracker_app/core/service_locator.dart';
+import 'package:vector_tracker_app/models/agente.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
 import 'package:vector_tracker_app/repositories/agente_repository.dart';
+import 'package:vector_tracker_app/screens/agent_profile_screen.dart';
+import 'package:vector_tracker_app/screens/edit_agent_profile_screen.dart';
+import 'package:vector_tracker_app/screens/report_problem_screen.dart';
+import 'package:vector_tracker_app/screens/update_password_screen.dart';
 import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/screens/pendencias_list_screen.dart';
@@ -23,7 +28,7 @@ import 'package:vector_tracker_app/screens/denuncia_screen.dart';
 import 'package:vector_tracker_app/screens/mapa_denuncias_screen.dart';
 import 'package:vector_tracker_app/screens/minhas_denuncias_screen.dart';
 import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
-import 'package:vector_tracker_app/screens/splash_screen.dart'; // Importa a nova tela de splash
+import 'package:vector_tracker_app/screens/splash_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,8 +54,6 @@ Future<void> main() async {
 
     AppLogger.info('✓ Hive inicializado');
 
-    // --- CORREÇÃO ---
-    // Apenas chamamos o setup, que já cuida de todos os registros.
     ServiceLocator.setup();
     AppLogger.info('✓ Service Locator configurado');
 
@@ -62,7 +65,7 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         Provider(create: (_) => ServiceLocator.get<AgenteRepository>()),
-        ChangeNotifierProvider.value(value: GetIt.I.get<DenunciaService>()), 
+        ChangeNotifierProvider.value(value: GetIt.I.get<DenunciaService>()),
         ChangeNotifierProvider(create: (_) => ServiceLocator.get<AgentOcorrenciaService>()),
       ],
       child: const MyApp(),
@@ -93,12 +96,19 @@ class MyApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const SplashScreen(), 
+      home: const SplashScreen(),
       routes: {
         '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
         '/community_home': (context) => const CommunityHomeScreen(),
         '/agent_home': (context) => const AgentHomeScreen(),
+        '/agent_profile': (context) => const AgentProfileScreen(),
+        '/update_password': (context) => const UpdatePasswordScreen(),
+        '/edit_agent_profile': (context) {
+          final agente = ModalRoute.of(context)!.settings.arguments as Agente;
+          return EditAgentProfileScreen(agente: agente);
+        },
+        '/report_problem': (context) => const ReportProblemScreen(),
         '/educacao': (context) => const EducacaoScreen(),
         '/denuncia': (context) => const DenunciaScreen(),
         '/mapa_denuncias': (context) => const MapaDenunciasScreen(),

@@ -11,6 +11,7 @@ class Agente {
   final String? registroMatricula;
   final bool? ativo;
   final DateTime? createdAt;
+  final String? avatarUrl; // <-- CAMPO ADICIONADO
 
   final String? municipioNome;
   final List<LocalidadeSimples> localidades;
@@ -24,6 +25,7 @@ class Agente {
     this.registroMatricula,
     this.ativo,
     this.createdAt,
+    this.avatarUrl, // <-- CAMPO ADICIONADO
     this.municipioNome,
     this.localidades = const [],
   });
@@ -50,6 +52,7 @@ class Agente {
       registroMatricula: map['registro_matricula'],
       ativo: map['ativo'],
       createdAt: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
+      avatarUrl: map['avatar_url'], // <-- CAMPO ADICIONADO
       municipioNome: map['municipios'] != null ? map['municipios']['nome'] : 'Município não encontrado',
       localidades: localidadesLista,
     );
@@ -64,6 +67,7 @@ class Agente {
     String? registroMatricula,
     bool? ativo,
     DateTime? createdAt,
+    String? avatarUrl, // <-- CAMPO ADICIONADO
     String? municipioNome,
     List<LocalidadeSimples>? localidades,
   }) {
@@ -76,6 +80,7 @@ class Agente {
       registroMatricula: registroMatricula ?? this.registroMatricula,
       ativo: ativo ?? this.ativo,
       createdAt: createdAt ?? this.createdAt,
+      avatarUrl: avatarUrl ?? this.avatarUrl, // <-- CAMPO ADICIONADO
       municipioNome: municipioNome ?? this.municipioNome,
       localidades: localidades ?? this.localidades,
     );

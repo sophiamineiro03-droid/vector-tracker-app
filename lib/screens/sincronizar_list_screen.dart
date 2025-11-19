@@ -1,13 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:vector_tracker_app/models/ocorrencia_enum_extensions.dart';
 import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
 import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 
-class SincronizarListScreen extends StatelessWidget {
+class SincronizarListScreen extends StatefulWidget {
   const SincronizarListScreen({super.key});
+
+  @override
+  State<SincronizarListScreen> createState() => _SincronizarListScreenState();
+}
+
+class _SincronizarListScreenState extends State<SincronizarListScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Garante que a lista de pendentes seja carregada ao entrar na tela
+    Future.microtask(() {
+      context.read<AgentOcorrenciaService>().fetchPendingOcorrencias();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,28 +28,40 @@ class SincronizarListScreen extends StatelessWidget {
       appBar: const GradientAppBar(title: 'Sincronizar Dados (Pendentes)'),
       body: Consumer<AgentOcorrenciaService>(
         builder: (context, agentService, child) {
-          if (agentService.ocorrencias.isEmpty && !agentService.isLoading) {
-            Future.microtask(() => agentService.fetchOcorrencias());
-          }
+          // A lista de pendentes agora vem da nova propriedade
+          final pendentes = agentService.pendingOcorrencias;
 
-          if (agentService.isLoading && agentService.ocorrencias.isEmpty) {
+          if (agentService.isLoading && pendentes.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final pendentes = agentService.ocorrencias.where((o) => !o.sincronizado).toList();
-
           if (pendentes.isEmpty) {
-            return const Center(
-              child: Text(
-                'Nenhum registro local para sincronizar.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey),
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      'Nenhum registro local para sincronizar.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: () => agentService.fetchPendingOcorrencias(),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Verificar novamente'),
+                    )
+                  ],
+                ),
               ),
             );
           }
 
           return RefreshIndicator(
-            onRefresh: () => agentService.forceRefresh(),
+            // A atualização agora busca apenas os itens pendentes
+            onRefresh: () => agentService.fetchPendingOcorrencias(),
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
               itemCount: pendentes.length,
@@ -76,6 +101,7 @@ class SincronizarListScreen extends StatelessWidget {
       ),
       floatingActionButton: Consumer<AgentOcorrenciaService>(
         builder: (context, agentService, child) {
+          // O botão agora aparece baseado na contagem da nova lista
           if (agentService.pendingSyncCount == 0) {
             return const SizedBox.shrink();
           }
@@ -93,8 +119,8 @@ class SincronizarListScreen extends StatelessWidget {
                 ScaffoldMessenger.of(context).hideCurrentSnackBar();
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(resultMessage), // Usa a mensagem de texto diretamente
-                    backgroundColor: resultMessage.contains('sucesso') ? Colors.green : Colors.red, // Determina a cor pela mensagem
+                    content: Text(resultMessage),
+                    backgroundColor: resultMessage.contains('sucesso') ? Colors.green : Colors.red,
                   ),
                 );
               }
