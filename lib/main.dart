@@ -1,3 +1,4 @@
+ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -29,6 +30,10 @@ import 'package:vector_tracker_app/screens/mapa_denuncias_screen.dart';
 import 'package:vector_tracker_app/screens/minhas_denuncias_screen.dart';
 import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
 import 'package:vector_tracker_app/screens/splash_screen.dart';
+import 'package:vector_tracker_app/screens/agent_signup_screen.dart';
+
+// Chave global para navegação (permite navegar de qualquer lugar)
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -51,6 +56,8 @@ Future<void> main() async {
     await Hive.openBox('localidades_cache');
     await Hive.openBox('ocorrencias_cache');
     await Hive.openBox('pending_ocorrencias');
+    // Passo 3: Abre a caixa de cache do agente
+    await Hive.openBox('agente_cache');
 
     AppLogger.info('✓ Hive inicializado');
 
@@ -75,12 +82,64 @@ Future<void> main() async {
 
 final supabase = Supabase.instance.client;
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  StreamSubscription<AuthState>? _authSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupAuthListener();
+  }
+
+  void _setupAuthListener() {
+    // Ouvinte GLOBAL de autenticação.
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+      AppLogger.info('🔐 Evento de Auth Detectado Globalmente: $event');
+
+      if (event == AuthChangeEvent.passwordRecovery) {
+        AppLogger.info('>> RECUPERAÇÃO DE SENHA DETECTADA <<');
+        _navigateToUpdatePassword();
+      } else if (event == AuthChangeEvent.signedIn) {
+        // Às vezes, links mágicos disparam apenas signedIn.
+        // Vamos verificar se a URL inicial tinha type=recovery (isso é mais complexo sem deep link nativo, mas vamos tentar pelo evento)
+        AppLogger.info('Usuário logado. Verificando se precisa de troca de senha...');
+      }
+    });
+  }
+
+  void _navigateToUpdatePassword() {
+    // Pequeno delay para garantir que o contexto esteja pronto se o app acabou de abrir
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (navigatorKey.currentState != null) {
+        AppLogger.info('Navegando para /update_password agora!');
+        navigatorKey.currentState?.pushNamedAndRemoveUntil(
+          '/update_password',
+          (route) => false,
+        );
+      } else {
+        AppLogger.error('NavigatorKey current state is null! Não consigo navegar.');
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey, // Conecta a chave global ao MaterialApp
       title: 'Vector Tracker App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -100,10 +159,11 @@ class MyApp extends StatelessWidget {
       routes: {
         '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
+        '/agent_signup': (context) => const AgentSignupScreen(),
         '/community_home': (context) => const CommunityHomeScreen(),
         '/agent_home': (context) => const AgentHomeScreen(),
         '/agent_profile': (context) => const AgentProfileScreen(),
-        '/update_password': (context) => const UpdatePasswordScreen(),
+        '/update_password': (context) => const UpdatePasswordScreen(), // A tela está aqui!
         '/edit_agent_profile': (context) {
           final agente = ModalRoute.of(context)!.settings.arguments as Agente;
           return EditAgentProfileScreen(agente: agente);

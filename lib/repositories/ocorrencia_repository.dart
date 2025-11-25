@@ -24,7 +24,7 @@ class OcorrenciaRepository {
           .eq('agente_id', agenteId);
 
       final ocorrencias = (response as List)
-          .map((item) => Ocorrencia.fromMap(item as Map<String, dynamic>))
+          .map((item) => Ocorrencia.fromMap(item as Map<String, dynamic>).copyWith(sincronizado: true))
           .toList();
 
       await _cacheBox.clear();
@@ -50,7 +50,7 @@ class OcorrenciaRepository {
         .insert(ocorrencia.toMap())
         .select()
         .single();
-    return Ocorrencia.fromMap(response);
+    return Ocorrencia.fromMap(response).copyWith(sincronizado: true);
   }
 
   Future<Ocorrencia> updateInSupabase(Ocorrencia ocorrencia) async {
@@ -60,7 +60,7 @@ class OcorrenciaRepository {
         .eq('id', ocorrencia.id)
         .select()
         .single();
-    return Ocorrencia.fromMap(response);
+    return Ocorrencia.fromMap(response).copyWith(sincronizado: true);
   }
 
   Future<void> saveToPendingBox(Ocorrencia ocorrencia) async {

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:vector_tracker_app/core/app_logger.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -12,6 +13,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen> {
   StreamSubscription<AuthState>? _authSubscription;
   bool _redirected = false;
+  Timer? _timer;
 
   @override
   void initState() {
@@ -20,18 +22,38 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   void _initializeSplash() {
-    // 1. Configura o ouvinte para detectar o link de senha imediatamente
-    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
-      if (_redirected) return; // Se já saiu da tela, ignora
-      
-      if (data.event == AuthChangeEvent.passwordRecovery) {
-        _goToScreen('/update_password');
-      }
-    });
+    // 1. OUVINTE DE AUTENTICAÇÃO (Prioridade Máxima)
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
+      (data) {
+        // Log para ajudar a entender o que está acontecendo
+        AppLogger.info('Splash Event: ${data.event}');
 
-    // 2. Inicia o temporizador visual de 3 segundos (como era no original)
-    Timer(const Duration(seconds: 3), () {
-      if (_redirected) return; // Se o link já redirecionou, o timer não faz nada
+        if (_redirected) return;
+
+        if (data.event == AuthChangeEvent.passwordRecovery) {
+          // BINGO! Link de senha detectado.
+          _cancelTimer(); // Para o relógio de 3 segundos
+          _goToScreen('/update_password');
+        }
+      },
+      onError: (error) {
+        // Se o link estiver quebrado ou expirado, avisa o usuário
+        AppLogger.error('Erro no link de autenticação', error);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro no link: ${error.message ?? "Inválido ou expirado"}'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      },
+    );
+
+    // 2. TEMPORIZADOR VISUAL (3 Segundos)
+    _timer = Timer(const Duration(seconds: 3), () {
+      if (_redirected) return; 
       _checkSessionAndNavigate();
     });
   }
@@ -39,27 +61,32 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _checkSessionAndNavigate() async {
     if (!mounted) return;
     
-    // Verifica se já tem alguém logado
     final session = Supabase.instance.client.auth.currentSession;
 
+    // Se tiver sessão, vai pra Home. Se não, Login.
     if (session != null) {
-      // Usuário logado -> Vai para a Home
       _goToScreen('/agent_home');
     } else {
-      // Ninguém logado -> Vai para o Login
       _goToScreen('/login');
     }
+  }
+
+  void _cancelTimer() {
+    _timer?.cancel();
+    _timer = null;
   }
 
   void _goToScreen(String routeName) {
     if (_redirected || !mounted) return;
     _redirected = true;
+    _cancelTimer(); // Garante que o timer morra
     Navigator.of(context).pushNamedAndRemoveUntil(routeName, (route) => false);
   }
 
   @override
   void dispose() {
     _authSubscription?.cancel();
+    _cancelTimer();
     super.dispose();
   }
 
@@ -69,7 +96,6 @@ class _SplashScreenState extends State<SplashScreen> {
       backgroundColor: Colors.white,
       body: Center(
         child: SizedBox(
-          // Define a largura da imagem como 60% da largura da tela (como no original)
           width: MediaQuery.of(context).size.width * 0.6,
           child: Image.asset('assets/logo_agora_vai.png'),
         ),

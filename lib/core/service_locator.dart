@@ -26,6 +26,11 @@ class ServiceLocator {
       _getIt.registerLazySingleton<Box>(() => Hive.box('pending_ocorrencias'),
           instanceName: 'pending_ocorrencias');
     }
+    // Passo 4: Registra a caixa de cache do agente
+    if (!_getIt.isRegistered<Box>(instanceName: 'agente_cache')) {
+      _getIt.registerLazySingleton<Box>(() => Hive.box('agente_cache'),
+          instanceName: 'agente_cache');
+    }
 
     _getIt.registerLazySingleton<DenunciaRepository>(
           () => DenunciaRepository(
@@ -43,7 +48,10 @@ class ServiceLocator {
     );
 
     _getIt.registerLazySingleton<AgenteRepository>(
-          () => AgenteRepository(_getIt<SupabaseClient>()),
+          () => AgenteRepository(
+            _getIt<SupabaseClient>(),
+            _getIt<Box>(instanceName: 'agente_cache'), // Injeta o cache
+          ),
     );
 
     _getIt.registerLazySingleton<DenunciaService>(

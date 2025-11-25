@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:vector_tracker_app/repositories/agente_repository.dart';
 import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/widgets/dashboard_card.dart';
@@ -16,9 +17,17 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<AgentOcorrenciaService>(context, listen: false).fetchOcorrencias();
-      Provider.of<DenunciaService>(context, listen: false).fetchItems();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Carrega o agente para obter as localidades e filtrar as denúncias corretamente
+      final agenteRepository = Provider.of<AgenteRepository>(context, listen: false);
+      final agente = await agenteRepository.getCurrentAgent();
+      final localidadeIds = agente?.localidades.map((loc) => loc.id).toList();
+
+      if (mounted) {
+        Provider.of<AgentOcorrenciaService>(context, listen: false).fetchOcorrencias();
+        // Aplica o filtro de localidades também na tela inicial para que os números batam com a lista
+        Provider.of<DenunciaService>(context, listen: false).fetchItems(localidadeIds: localidadeIds);
+      }
     });
   }
 
@@ -32,14 +41,14 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
       body: Consumer2<AgentOcorrenciaService, DenunciaService>(
         builder: (context, agentService, denunciaService, child) {
           final pendenciasCount = denunciaService.items
-              .where((d) => d['status'] != 'Atendida')
+              .where((d) => (d['status'] as String?)?.toLowerCase() != 'atendida')
               .length;
-          final sincronizarCount = agentService.ocorrencias
-              .where((o) => o.sincronizado == false)
-              .length;
-          final meuTrabalhoCount = agentService.ocorrencias
-              .where((o) => o.sincronizado == true)
-              .length;
+          
+          // Usa o getter específico para contagem de sincronização
+          final sincronizarCount = agentService.pendingSyncCount;
+          
+          // Usa o tamanho da lista de histórico para "Meu Trabalho"
+          final meuTrabalhoCount = agentService.ocorrencias.length;
 
           final isLoading = (agentService.isLoading && agentService.ocorrencias.isEmpty) ||
               (denunciaService.isLoading && denunciaService.items.isEmpty);
@@ -50,8 +59,14 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
 
           return RefreshIndicator(
             onRefresh: () async {
-              await agentService.fetchOcorrencias();
-              await denunciaService.fetchItems();
+              final agenteRepository = Provider.of<AgenteRepository>(context, listen: false);
+              final agente = await agenteRepository.getCurrentAgent();
+              final localidadeIds = agente?.localidades.map((loc) => loc.id).toList();
+              
+              if (context.mounted) {
+                await agentService.fetchOcorrencias();
+                await denunciaService.fetchItems(localidadeIds: localidadeIds);
+              }
             },
             child: Padding(
               padding: const EdgeInsets.all(12.0),

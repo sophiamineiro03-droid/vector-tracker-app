@@ -19,4 +19,13 @@ class LocalidadeSimples {
       categoria: map['categoria'] as String? ?? '',
     );
   }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'nome': nome,
+      'codigo': codigo,
+      'categoria': categoria,
+    };
+  }
 }

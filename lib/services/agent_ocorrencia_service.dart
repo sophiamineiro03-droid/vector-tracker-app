@@ -3,7 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:uuid/uuid.dart';import 'package:vector_tracker_app/core/app_logger.dart';
+import 'package:uuid/uuid.dart';
+import 'package:vector_tracker_app/core/app_logger.dart';
 import 'package:vector_tracker_app/models/ocorrencia.dart';
 import 'package:vector_tracker_app/repositories/agente_repository.dart';
 import 'package:vector_tracker_app/repositories/ocorrencia_repository.dart';
@@ -17,9 +18,10 @@ class AgentOcorrenciaService extends ChangeNotifier {
   AgentOcorrenciaService(this._agenteRepository, this._ocorrenciaRepository);
 
   List<Ocorrencia> _ocorrencias = [];
+  // Histórico de ocorrências (já sincronizadas ou salvas localmente para histórico)
   List<Ocorrencia> get ocorrencias => _ocorrencias;
 
-  // Lista separada apenas para itens pendentes
+  // Lista separada apenas para itens pendentes de envio
   List<Ocorrencia> _pendingOcorrencias = [];
   List<Ocorrencia> get pendingOcorrencias => _pendingOcorrencias;
 
@@ -29,10 +31,10 @@ class AgentOcorrenciaService extends ChangeNotifier {
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
 
-  // Agora conta os itens da nossa lista interna
+  // Conta apenas os itens que realmente estão na fila de sincronização
   int get pendingSyncCount => _pendingOcorrencias.length;
 
-  // Nova função para buscar apenas os itens da caixa de pendentes
+  // Busca apenas os itens da caixa de pendentes
   Future<void> fetchPendingOcorrencias() async {
     try {
       _pendingOcorrencias = await _ocorrenciaRepository.getFromPendingBox();
@@ -47,9 +49,13 @@ class AgentOcorrenciaService extends ChangeNotifier {
   Future<void> fetchOcorrencias() async {
     _setLoading(true);
     try {
+      // Carrega histórico do cache
       _ocorrencias = await _ocorrenciaRepository.getOcorrenciasFromCache();
-      await fetchPendingOcorrencias(); // Garante que a lista de pendentes também seja carregada
+      // Carrega pendentes
+      await fetchPendingOcorrencias();
       notifyListeners();
+      
+      // Tenta buscar dados novos do servidor
       await forceRefresh();
     } catch (e) {
       AppLogger.error('Erro ao buscar ocorrências', e);
@@ -59,7 +65,7 @@ class AgentOcorrenciaService extends ChangeNotifier {
   }
 
   Future<void> forceRefresh() async {
-    _setLoading(true);
+    // Não ativa loading global para não travar a UI se for apenas atualização de fundo
     try {
       final agente = await _agenteRepository.getCurrentAgent();
       if (agente == null) {
@@ -70,9 +76,7 @@ class AgentOcorrenciaService extends ChangeNotifier {
       _ocorrencias = await _ocorrenciaRepository.fetchOcorrenciasByAgenteFromSupabase(agente.id);
       notifyListeners();
     } catch (e) {
-      AppLogger.error('Erro ao forçar atualização', e);
-    } finally {
-      _setLoading(false);
+      AppLogger.warning('Erro ao forçar atualização (possivelmente offline)', e);
     }
   }
 
@@ -84,8 +88,10 @@ class AgentOcorrenciaService extends ChangeNotifier {
 
       var ocorrenciaToUpload = ocorrencia.copyWith(agente_id: agente.id);
 
+      // Prepara URLs de imagens
       List<String> finalImageUrls = List.from(ocorrencia.fotos_urls ?? []);
 
+      // Upload de imagens novas
       if (ocorrenciaToUpload.localImagePaths != null &&
           ocorrenciaToUpload.localImagePaths!.isNotEmpty) {
         for (String path in ocorrenciaToUpload.localImagePaths!) {
@@ -103,33 +109,39 @@ class AgentOcorrenciaService extends ChangeNotifier {
       );
 
       final data = ocorrenciaToUpload.toMap();
+      
+      // Tenta salvar no Supabase
       await _supabase.from('ocorrencias').upsert(data);
       AppLogger.info('Ocorrência ${ocorrenciaToUpload.id} salva (upsert) no Supabase!');
 
-      // Se a ocorrencia veio de uma pendente, remove da caixa local
+      // SE SUCESSO: Remove da caixa de pendentes (caso estivesse lá)
       await _ocorrenciaRepository.deleteFromPendingBox(ocorrencia.id);
 
+      // Atualiza status da denúncia se houver
       if (ocorrenciaToUpload.denuncia_id != null &&
           ocorrenciaToUpload.denuncia_id!.isNotEmpty) {
         try {
           await _supabase
               .from('denuncias')
               .update({'status': 'atendida'}).eq('id', ocorrenciaToUpload.denuncia_id!);
-          AppLogger.info(
-              'Status da denúncia ${ocorrenciaToUpload.denuncia_id} atualizado para "atendida".');
+          
           final denunciaService = GetIt.I.get<DenunciaService>();
-          await denunciaService.fetchItems();
+          await denunciaService.updateDenunciaStatus(ocorrenciaToUpload.denuncia_id!, 'atendida');
         } catch (e, s) {
           AppLogger.error('Falha ao atualizar o status da denúncia original.', e, s);
         }
       }
-    } catch (e) {
-      AppLogger.warning('Falha ao salvar online, salvando localmente.', e);
-      await _ocorrenciaRepository.saveToPendingBox(ocorrencia.copyWith(sincronizado: false));
-    } finally {
-      // Sempre atualiza as duas listas após qualquer operação de salvar
+      
+      // Atualiza listas em memória
       await fetchPendingOcorrencias();
       await forceRefresh();
+
+    } catch (e) {
+      AppLogger.warning('Falha ao salvar online, salvando localmente.', e);
+      // SE FALHA: Salva na caixa de pendentes
+      await _ocorrenciaRepository.saveToPendingBox(ocorrencia.copyWith(sincronizado: false));
+      await fetchPendingOcorrencias();
+    } finally {
       _setLoading(false);
     }
   }
@@ -152,7 +164,6 @@ class AgentOcorrenciaService extends ChangeNotifier {
   Future<String> syncPendingOcorrencias() async {
     if (_isSyncing) return "Sincronização já em andamento.";
 
-    // Garante que a lista de pendentes esteja atualizada antes de sincronizar
     await fetchPendingOcorrencias();
     if (_pendingOcorrencias.isEmpty) {
       return "Nenhuma ocorrência pendente para sincronizar.";
@@ -160,26 +171,31 @@ class AgentOcorrenciaService extends ChangeNotifier {
 
     _setSyncing(true);
     int successCount = 0;
-    // Usa uma cópia da lista para iterar, pois a original será modificada durante o processo
     final itemsToSync = List<Ocorrencia>.from(_pendingOcorrencias);
 
     for (var ocorrencia in itemsToSync) {
       try {
-        // A função 'saveOcorrencia' agora lida com o upload e a remoção da caixa de pendentes
+        // Reutiliza saveOcorrencia que já trata upload e remoção de pendentes
         await saveOcorrencia(ocorrencia);
-        successCount++;
+        
+        // Verifica se foi removido dos pendentes para confirmar sucesso
+        final stillPending = await _ocorrenciaRepository.getFromPendingBox();
+        if (!stillPending.any((o) => o.id == ocorrencia.id)) {
+           successCount++;
+        }
       } catch (e, s) {
         AppLogger.error('Erro ao sincronizar ocorrência ${ocorrencia.id}', e, s);
       }
     }
 
+    _setSyncing(false);
+    await fetchPendingOcorrencias(); // Garante UI atualizada
+
     final message = successCount == itemsToSync.length
-        ? "Todas as ${itemsToSync.length} ocorrências pendentes foram sincronizadas com sucesso!"
-        : "Sincronização concluída. $successCount de ${itemsToSync.length} ocorrências foram sincronizadas.";
+        ? "Todas as ${itemsToSync.length} ocorrências foram sincronizadas!"
+        : "Sincronização concluída. $successCount de ${itemsToSync.length} enviadas.";
 
     AppLogger.sync(message);
-    _setSyncing(false);
-    // As listas são atualizadas automaticamente pelo 'saveOcorrencia', então não precisamos chamar 'forceRefresh' aqui.
     return message;
   }
 

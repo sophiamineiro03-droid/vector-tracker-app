@@ -11,7 +11,7 @@ class Agente {
   final String? registroMatricula;
   final bool? ativo;
   final DateTime? createdAt;
-  final String? avatarUrl; // <-- CAMPO ADICIONADO
+  final String? avatarUrl;
 
   final String? municipioNome;
   final List<LocalidadeSimples> localidades;
@@ -25,7 +25,7 @@ class Agente {
     this.registroMatricula,
     this.ativo,
     this.createdAt,
-    this.avatarUrl, // <-- CAMPO ADICIONADO
+    this.avatarUrl,
     this.municipioNome,
     this.localidades = const [],
   });
@@ -41,6 +41,12 @@ class Agente {
           localidadesLista.add(LocalidadeSimples.fromMap(localidadeData));
         }
       }
+    } else if (map['localidades'] != null) {
+       // Suporte para carregar do cache local onde a estrutura é simplificada
+       final locs = map['localidades'] as List;
+       for (var l in locs) {
+         localidadesLista.add(LocalidadeSimples.fromMap(Map<String, dynamic>.from(l)));
+       }
     }
 
     return Agente(
@@ -52,10 +58,28 @@ class Agente {
       registroMatricula: map['registro_matricula'],
       ativo: map['ativo'],
       createdAt: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
-      avatarUrl: map['avatar_url'], // <-- CAMPO ADICIONADO
-      municipioNome: map['municipios'] != null ? map['municipios']['nome'] : 'Município não encontrado',
+      avatarUrl: map['avatar_url'],
+      municipioNome: map['municipios'] != null 
+          ? (map['municipios'] is Map ? map['municipios']['nome'] : null) // Do Supabase vem como objeto
+          : map['municipio_nome'], // Do cache vem direto como string
       localidades: localidadesLista,
     );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'user_id': userId,
+      'municipio_id': municipioId,
+      'nome': nome,
+      'email': email,
+      'registro_matricula': registroMatricula,
+      'ativo': ativo,
+      'created_at': createdAt?.toIso8601String(),
+      'avatar_url': avatarUrl,
+      'municipio_nome': municipioNome, // Salvando plano para facilitar leitura
+      'localidades': localidades.map((l) => l.toMap()).toList(),
+    };
   }
 
   Agente copyWith({
@@ -67,7 +91,7 @@ class Agente {
     String? registroMatricula,
     bool? ativo,
     DateTime? createdAt,
-    String? avatarUrl, // <-- CAMPO ADICIONADO
+    String? avatarUrl,
     String? municipioNome,
     List<LocalidadeSimples>? localidades,
   }) {
@@ -80,7 +104,7 @@ class Agente {
       registroMatricula: registroMatricula ?? this.registroMatricula,
       ativo: ativo ?? this.ativo,
       createdAt: createdAt ?? this.createdAt,
-      avatarUrl: avatarUrl ?? this.avatarUrl, // <-- CAMPO ADICIONADO
+      avatarUrl: avatarUrl ?? this.avatarUrl,
       municipioNome: municipioNome ?? this.municipioNome,
       localidades: localidades ?? this.localidades,
     );

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -13,15 +14,84 @@ class _LoginScreenState extends State<LoginScreen> {
   int _selectedTab = 1; // 0 para Comunidade, 1 para Agente
   bool _isLoading = false;
   bool _obscureText = true;
+  bool _showForgotPassword = false; // Nova variável para controlar a exibição do botão
 
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  StreamSubscription<AuthState>? _authSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupAuthListener();
+  }
+
+  void _setupAuthListener() {
+    // Ouve eventos de autenticação, especificamente o de Recuperação de Senha
+    _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.passwordRecovery) {
+        if (mounted) {
+           // Se detectar que o usuário clicou num link de senha, redireciona para a tela de troca
+           Navigator.pushNamed(context, '/update_password');
+        }
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _authSubscription?.cancel();
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  // Lógica para enviar o email de recuperação
+  Future<void> _sendPasswordResetEmail() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor, digite seu e-mail acima para recuperar a senha.')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      await Supabase.instance.client.auth.resetPasswordForEmail(email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('E-mail de recuperação enviado! Verifique sua caixa de entrada.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on AuthException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Erro ao enviar e-mail: ${error.message}'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Erro inesperado. Tente novamente.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   // Lógica de login atualizada para usar Supabase
@@ -56,11 +126,17 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
     } on AuthException catch (error) {
-      // Captura erros de autenticação (email/senha errados, usuário não confirmado, etc.)
+      // Se o erro for de credenciais inválidas, mostra o botão "Esqueci a Senha"
+      if (error.message.contains('Invalid login credentials') || error.message.contains('invalid_grant')) {
+        setState(() {
+          _showForgotPassword = true;
+        });
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(error.message),
+            content: Text(error.message == 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message),
             backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
@@ -154,6 +230,19 @@ class _LoginScreenState extends State<LoginScreen> {
                               return null;
                             },
                           ),
+                          
+                          // Mostra o botão "Esqueci a Senha" apenas se o login falhar
+                          if (_showForgotPassword) ...[
+                            const SizedBox(height: 8),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: _isLoading ? null : _sendPasswordResetEmail,
+                                child: const Text('Esqueci minha senha', style: TextStyle(color: Colors.red)),
+                              ),
+                            ),
+                          ],
+
                           const SizedBox(height: 24.0),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
@@ -167,6 +256,19 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                                 : const Text('Entrar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           ),
+                          
+                          if (_selectedTab == 1) ...[
+                            const SizedBox(height: 16.0),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.pushNamed(context, '/agent_signup');
+                              },
+                              child: const Text(
+                                'Não tem conta? Cadastre-se',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),

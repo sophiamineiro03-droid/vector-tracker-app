@@ -1,11 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 /// Um widget de imagem inteligente que decide se deve carregar uma imagem da rede ou de um arquivo local.
-///
-/// Ele verifica se a `imageSource` começa com 'http' para carregar da rede,
-/// caso contrário, trata como um caminho de arquivo local.
-class SmartImage extends StatelessWidget {
+/// Agora suporta cache offline (lê de local se existir).
+class SmartImage extends StatefulWidget {
   final String imageSource;
   final BoxFit? fit;
   final double? width;
@@ -20,39 +19,95 @@ class SmartImage extends StatelessWidget {
   });
 
   @override
+  State<SmartImage> createState() => _SmartImageState();
+}
+
+class _SmartImageState extends State<SmartImage> {
+  File? _cachedFile;
+  bool _isLoadingCache = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkCache();
+  }
+  
+  @override
+  void didUpdateWidget(SmartImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageSource != widget.imageSource) {
+      _checkCache();
+    }
+  }
+
+  Future<void> _checkCache() async {
+    if (!widget.imageSource.startsWith('http')) {
+      if (mounted) {
+        setState(() {
+          _isLoadingCache = false;
+          _cachedFile = null;
+        });
+      }
+      return;
+    }
+
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final cacheDir = Directory('${docDir.path}/images_cache');
+      
+      // Estratégia simples de nome de arquivo: último segmento da URL
+      final uri = Uri.parse(widget.imageSource);
+      final filename = uri.pathSegments.last; 
+      final file = File('${cacheDir.path}/$filename');
+
+      if (await file.exists()) {
+        if (mounted) {
+          setState(() {
+            _cachedFile = file;
+            _isLoadingCache = false;
+          });
+        }
+        return;
+      }
+    } catch (e) {
+      // Ignora erro de cache
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoadingCache = false;
+        _cachedFile = null;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    bool isNetworkImage = imageSource.startsWith('http');
+    // 1. Se for arquivo local direto (caminho string)
+    if (!widget.imageSource.startsWith('http')) {
+       return _buildImageFile(File(widget.imageSource));
+    }
+    
+    // 2. Se achou no cache
+    if (_cachedFile != null) {
+      return _buildImageFile(_cachedFile!);
+    }
 
-    Widget errorWidget = SizedBox(
-      width: width,
-      height: height,
-      child: Center(
-        child: Icon(
-          Icons.broken_image,
-          size: 40.0, // Tamanho ajustado
-          color: Colors.grey[400],
-        ),
-      ),
-    );
-
-    return isNetworkImage
-        ? Image.network(
-      imageSource,
-      width: width,
-      height: height,
-      fit: fit,
-      // --- A CORREÇÃO ESTÁ AQUI ---
+    // 3. Fallback para rede
+    return Image.network(
+      widget.imageSource,
+      width: widget.width,
+      height: widget.height,
+      fit: widget.fit,
       loadingBuilder: (BuildContext context, Widget child,
           ImageChunkEvent? loadingProgress) {
         if (loadingProgress == null) return child;
-        // Garante que o indicador de loading tenha um tamanho fixo,
-        // evitando o erro de layout no ListTile.
         return SizedBox(
-          width: width,
-          height: height,
+          width: widget.width,
+          height: widget.height,
           child: Center(
             child: CircularProgressIndicator(
-              strokeWidth: 2.0, // Deixa o círculo mais fino
+              strokeWidth: 2.0,
               value: loadingProgress.expectedTotalBytes != null
                   ? loadingProgress.cumulativeBytesLoaded /
                   loadingProgress.expectedTotalBytes!
@@ -61,14 +116,33 @@ class SmartImage extends StatelessWidget {
           ),
         );
       },
-      errorBuilder: (context, error, stackTrace) => errorWidget,
-    )
-        : Image.file(
-      File(imageSource),
-      width: width,
-      height: height,
-      fit: fit,
-      errorBuilder: (context, error, stackTrace) => errorWidget,
+      errorBuilder: (context, error, stackTrace) {
+         return _buildErrorWidget();
+      },
+    );
+  }
+
+  Widget _buildImageFile(File file) {
+    return Image.file(
+      file,
+      width: widget.width,
+      height: widget.height,
+      fit: widget.fit,
+      errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return SizedBox(
+      width: widget.width,
+      height: widget.height,
+      child: Center(
+        child: Icon(
+          Icons.broken_image,
+          size: 40.0,
+          color: Colors.grey[400],
+        ),
+      ),
     );
   }
 }

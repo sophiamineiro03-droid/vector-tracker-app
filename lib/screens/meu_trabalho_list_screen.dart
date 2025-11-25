@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:vector_tracker_app/models/ocorrencia.dart';
-import 'package:vector_tracker_app/models/ocorrencia_enum_extensions.dart';
 import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
 import 'package:vector_tracker_app/services/agent_ocorrencia_service.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
@@ -28,29 +27,39 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
   Widget build(BuildContext context) {
     return Consumer<AgentOcorrenciaService>(
       builder: (context, agentService, child) {
-        final ocorrenciasDoAgente = agentService.ocorrencias;
+        // Ordena a lista do mais recente para o mais antigo
+        final ocorrenciasDoAgente = List<Ocorrencia>.from(agentService.ocorrencias);
+        ocorrenciasDoAgente.sort((a, b) {
+           final dateA = a.data_atividade ?? a.created_at ?? DateTime(2000);
+           final dateB = b.data_atividade ?? b.created_at ?? DateTime(2000);
+           return dateB.compareTo(dateA); // Decrescente
+        });
 
         return Scaffold(
           appBar: const GradientAppBar(title: 'Meu Histórico de Trabalho'),
-          body: agentService.isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : ocorrenciasDoAgente.isEmpty
-              ? const Center(
-            child: Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text(
-                'Nenhum registro de trabalho encontrado para seu usuário.',
-                textAlign: TextAlign.center,
+          // SafeArea garante que o conteúdo não fique embaixo das barras do sistema
+          body: SafeArea(
+            child: agentService.isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : ocorrenciasDoAgente.isEmpty
+                ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Text(
+                  'Nenhum registro de trabalho encontrado para seu usuário.',
+                  textAlign: TextAlign.center,
+                ),
               ),
+            )
+                : ListView.builder(
+              // Adiciona um padding extra na parte inferior para garantir que o último item não fique colado na borda
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
+              itemCount: ocorrenciasDoAgente.length,
+              itemBuilder: (context, index) {
+                final ocorrencia = ocorrenciasDoAgente[index];
+                return _buildOcorrenciaCard(context, ocorrencia);
+              },
             ),
-          )
-              : ListView.builder(
-            padding: const EdgeInsets.all(8),
-            itemCount: ocorrenciasDoAgente.length,
-            itemBuilder: (context, index) {
-              final ocorrencia = ocorrenciasDoAgente[index];
-              return _buildOcorrenciaCard(context, ocorrencia);
-            },
           ),
         );
       },
@@ -63,10 +72,6 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
     final data = ocorrencia.data_atividade != null
         ? DateFormat('dd/MM/yyyy').format(ocorrencia.data_atividade!)
         : 'Data indisponível';
-
-    final atividades =
-        ocorrencia.tipo_atividade?.map((e) => e.displayName).join(', ') ??
-            'Não especificada';
 
     final firstImage =
     ocorrencia.fotos_urls?.isNotEmpty == true ? ocorrencia.fotos_urls!.first : null;
@@ -84,8 +89,8 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
           child: firstImage != null
               ? SmartImage(imageSource: firstImage, fit: BoxFit.cover)
               : Icon(
-            isFromDenuncia ? Icons.warning_amber_rounded : Icons.history,
-            color: isFromDenuncia ? Colors.orangeAccent : Colors.blueGrey,
+            Icons.assignment_turned_in,
+            color: isFromDenuncia ? Colors.green : Colors.blue,
             size: 40,
           ),
         ),
@@ -93,13 +98,13 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
           endereco,
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
-        subtitle: Text('Atividade de $atividades em $data'),
+        subtitle: Text('Atividade em $data'),
         // --- ÍCONE EXTRA PARA CLAREZA ---
         trailing: Tooltip(
           message: isFromDenuncia ? 'Atendimento à Denúncia' : 'Registro Proativo',
           child: Icon(
-            isFromDenuncia ? Icons.warning_amber_rounded : Icons.assignment_ind_outlined,
-            color: isFromDenuncia ? Colors.orangeAccent : Colors.blueGrey[300],
+            Icons.assignment_turned_in,
+            color: isFromDenuncia ? Colors.green : Colors.blue,
           ),
         ),
         onTap: () => Navigator.of(context).push(
