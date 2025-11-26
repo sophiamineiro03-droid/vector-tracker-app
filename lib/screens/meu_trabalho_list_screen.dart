@@ -19,7 +19,7 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<AgentOcorrenciaService>(context, listen: false).forceRefresh();
+      Provider.of<AgentOcorrenciaService>(context, listen: false).fetchOcorrencias();
     });
   }
 
@@ -37,7 +37,6 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
 
         return Scaffold(
           appBar: const GradientAppBar(title: 'Meu Histórico de Trabalho'),
-          // SafeArea garante que o conteúdo não fique embaixo das barras do sistema
           body: SafeArea(
             child: agentService.isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -52,7 +51,6 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
               ),
             )
                 : ListView.builder(
-              // Adiciona um padding extra na parte inferior para garantir que o último item não fique colado na borda
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 80),
               itemCount: ocorrenciasDoAgente.length,
               itemBuilder: (context, index) {
@@ -73,10 +71,32 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
         ? DateFormat('dd/MM/yyyy').format(ocorrencia.data_atividade!)
         : 'Data indisponível';
 
-    final firstImage =
-    ocorrencia.fotos_urls?.isNotEmpty == true ? ocorrencia.fotos_urls!.first : null;
+    // LÓGICA MELHORADA DE SELEÇÃO DE IMAGEM
+    String? displayImage;
 
-    // --- LÓGICA DE DIFERENCIAÇÃO ---
+    // 1. Tenta encontrar um arquivo LOCAL real primeiro (prioridade máxima offline)
+    if (ocorrencia.localImagePaths != null && ocorrencia.localImagePaths!.isNotEmpty) {
+      try {
+        displayImage = ocorrencia.localImagePaths!.firstWhere(
+          (path) => !path.startsWith('http'), 
+          orElse: () => '' // Retorna vazio se não achar, para tratar abaixo
+        );
+        if (displayImage!.isEmpty) displayImage = null;
+      } catch (e) {
+        displayImage = null;
+      }
+    }
+
+    // 2. Se não achou arquivo local, usa o primeiro path disponível (mesmo que seja URL, ex: foto da denúncia)
+    if (displayImage == null && ocorrencia.localImagePaths != null && ocorrencia.localImagePaths!.isNotEmpty) {
+       displayImage = ocorrencia.localImagePaths!.first;
+    }
+
+    // 3. Se ainda não tem, tenta urls confirmadas do servidor
+    if (displayImage == null && ocorrencia.fotos_urls != null && ocorrencia.fotos_urls!.isNotEmpty) {
+      displayImage = ocorrencia.fotos_urls!.first;
+    }
+
     final isFromDenuncia = ocorrencia.denuncia_id != null;
 
     return Card(
@@ -86,8 +106,8 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
         leading: SizedBox(
           width: 50,
           height: 50,
-          child: firstImage != null
-              ? SmartImage(imageSource: firstImage, fit: BoxFit.cover)
+          child: displayImage != null
+              ? SmartImage(imageSource: displayImage, fit: BoxFit.cover)
               : Icon(
             Icons.assignment_turned_in,
             color: isFromDenuncia ? Colors.green : Colors.blue,
@@ -99,7 +119,6 @@ class _MeuTrabalhoListScreenState extends State<MeuTrabalhoListScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         subtitle: Text('Atividade em $data'),
-        // --- ÍCONE EXTRA PARA CLAREZA ---
         trailing: Tooltip(
           message: isFromDenuncia ? 'Atendimento à Denúncia' : 'Registro Proativo',
           child: Icon(

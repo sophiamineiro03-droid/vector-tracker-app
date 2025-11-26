@@ -25,7 +25,7 @@ class _SincronizarListScreenState extends State<SincronizarListScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const GradientAppBar(title: 'Sincronizar Dados (Pendentes)'),
+      appBar: const GradientAppBar(title: 'Sincronizar Dados'),
       body: Consumer<AgentOcorrenciaService>(
         builder: (context, agentService, child) {
           // A lista de pendentes agora vem da nova propriedade

@@ -37,12 +37,6 @@ class CommunityHomeScreen extends StatelessWidget {
                 Navigator.pushNamed(context, '/educacao');
               },
             ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.warning_amber_rounded),
-              label: const Text('Mapa de Risco'),
-              onPressed: null, // null para desabilitar o botão
-            ),
           ],
         ),
       ),

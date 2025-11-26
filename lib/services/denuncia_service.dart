@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io'; // Import necessário para lidar com arquivos
+import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
@@ -8,6 +8,8 @@ import 'package:vector_tracker_app/core/app_logger.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
 import 'package:vector_tracker_app/models/localidade.dart';
 import 'package:vector_tracker_app/models/municipio.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 class DenunciaService with ChangeNotifier {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -115,11 +117,9 @@ class DenunciaService with ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    // Se um novo filtro for fornecido, ele se torna o filtro principal.
     if (localidadeIds != null) {
       _currentLocalidadeIdsFilter = localidadeIds;
     }
-    // A busca SEMPRE usará o último filtro aplicado.
     final filterToUse = _currentLocalidadeIdsFilter;
 
     try {
@@ -141,7 +141,6 @@ class DenunciaService with ChangeNotifier {
           connectivityResult == ConnectivityResult.wifi;
 
       if (isOnline) {
-        // CORREÇÃO: Consulta explícita para garantir a estrutura de dados correta.
         var query = _supabase
             .from('denuncias')
             .select('*, localidades!inner(nome, municipios!inner(nome))');
@@ -150,15 +149,16 @@ class DenunciaService with ChangeNotifier {
           query = query.inFilter('localidade_id', filterToUse);
         }
 
-        // ...
         final response = await query;
         final remoteItems = List<Map<String, dynamic>>.from(response);
 
         await _denunciasCache.clear();
-// ...
         for (var item in remoteItems) {
           _denunciasCache.put(item['id'], item);
         }
+
+        // CORREÇÃO: Await para garantir o download antes de liberar a UI ou ficar offline
+        await _downloadImages(remoteItems);
 
         final combined = _denunciasCache.values.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         final pendingAgain = _pendingDenunciasBox.values.map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -173,6 +173,39 @@ class DenunciaService with ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _downloadImages(List<Map<String, dynamic>> items) async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final cacheDir = Directory('${docDir.path}/images_cache');
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+
+      for (var item in items) {
+        final url = item['foto_url'] as String?;
+        if (url != null && url.startsWith('http')) {
+           try {
+             final uri = Uri.parse(url);
+             final filename = uri.pathSegments.last;
+             final file = File('${cacheDir.path}/$filename');
+             
+             if (!await file.exists()) {
+                final response = await http.get(uri);
+                if (response.statusCode == 200) {
+                  await file.writeAsBytes(response.bodyBytes);
+                  AppLogger.info('Imagem baixada para cache: $filename');
+                }
+             }
+           } catch (e) {
+             // Ignore individual download errors
+           }
+        }
+      }
+    } catch (e) {
+      AppLogger.error('Erro ao baixar imagens para cache', e);
     }
   }
 
@@ -199,7 +232,6 @@ class DenunciaService with ChangeNotifier {
         await _denunciasCache.put(denunciaId, denunciaMap);
       }
 
-      // Força a atualização da lista, agora usando o filtro que já está guardado.
       await fetchItems();
 
       AppLogger.info('Status da denúncia $denunciaId atualizado para $novoStatus');

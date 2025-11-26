@@ -37,7 +37,7 @@ class Ocorrencia {
 
   // Campos que existem APENAS no App, não no banco de dados
   final String? municipio_id_ui;
-  final String? municipioNome; // <<<< ADICIONADO
+  final String? municipioNome;
   final String? localidade_ui;
   final String? setor_id_ui;
 
@@ -76,7 +76,7 @@ class Ocorrencia {
     this.created_at,
     required this.sincronizado,
     this.municipio_id_ui,
-    this.municipioNome, // <<<< ADICIONADO
+    this.municipioNome,
     this.localidade_ui,
     this.setor_id_ui,
   });
@@ -91,6 +91,9 @@ class Ocorrencia {
         final municipiosData = localidadesData['municipios'] as Map<String, dynamic>;
         extractedMunicipioNome = municipiosData['nome'];
       }
+    } else {
+      // Fallback para ler do cache local se tiver sido salvo plano (mantendo lógica de leitura)
+      extractedMunicipioNome = map['municipioNome'];
     }
 
     return Ocorrencia(
@@ -98,7 +101,7 @@ class Ocorrencia {
       agente_id: map['agente_id'],
       denuncia_id: map['denuncia_id'],
       localidade_id: map['localidade_id'],
-      municipioNome: extractedMunicipioNome, // <<<< ADICIONADO
+      municipioNome: extractedMunicipioNome,
       tipo_atividade: map['tipo_atividade'] is List
           ? (map['tipo_atividade'] as List)
               .map((e) => TipoAtividade.values.firstWhere((v) => v.name == e,
@@ -157,7 +160,8 @@ class Ocorrencia {
   }
 
   Map<String, dynamic> toMap() {
-    // CORREÇÃO: Apenas campos que existem no banco de dados são incluídos.
+    // REVERSÃO: Removidos campos 'localImagePaths', 'sincronizado', 'municipioNome' 
+    // para evitar erro no Supabase.
     return {
       'id': id,
       'agente_id': agente_id,
@@ -191,6 +195,16 @@ class Ocorrencia {
       'created_at': created_at?.toIso8601String(),
       'fotos_urls': fotos_urls,
     };
+  }
+
+  // Método auxiliar opcional se quisermos salvar localmente no futuro sem quebrar o Supabase
+  Map<String, dynamic> toLocalMap() {
+     var map = toMap();
+     map['localImagePaths'] = localImagePaths;
+     map['sincronizado'] = sincronizado;
+     map['municipioNome'] = municipioNome;
+     map['municipio_id_ui'] = municipio_id_ui;
+     return map;
   }
 
   Ocorrencia copyWith({
@@ -228,7 +242,7 @@ class Ocorrencia {
     DateTime? created_at,
     bool? sincronizado,
     String? municipio_id_ui,
-    String? municipioNome, // <<<< ADICIONADO
+    String? municipioNome,
     String? localidade_ui,
     String? setor_id_ui,
   }) {
@@ -272,7 +286,7 @@ class Ocorrencia {
       created_at: created_at ?? this.created_at,
       sincronizado: sincronizado ?? this.sincronizado,
       municipio_id_ui: municipio_id_ui ?? this.municipio_id_ui,
-      municipioNome: municipioNome ?? this.municipioNome, // <<<< ADICIONADO
+      municipioNome: municipioNome ?? this.municipioNome,
       localidade_ui: localidade_ui ?? this.localidade_ui,
       setor_id_ui: setor_id_ui ?? this.setor_id_ui,
     );

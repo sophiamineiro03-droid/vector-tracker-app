@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:vector_tracker_app/core/app_logger.dart';
@@ -46,13 +47,34 @@ class AgentOcorrenciaService extends ChangeNotifier {
     }
   }
 
+  // Método auxiliar para combinar cache + pendentes
+  void _mergeOcorrencias(List<Ocorrencia> cachedOrServerList) {
+    final Map<String, Ocorrencia> combinedMap = {};
+    
+    // 1. Adiciona a lista base (cache ou servidor)
+    for (var o in cachedOrServerList) {
+      combinedMap[o.id] = o;
+    }
+    
+    // 2. Sobrepõe com pendentes (pendentes têm prioridade pois são edições locais ou novos registros)
+    for (var p in _pendingOcorrencias) {
+      combinedMap[p.id] = p;
+    }
+    
+    _ocorrencias = combinedMap.values.toList();
+    // A ordenação é feita na UI, mas poderíamos ordenar aqui se necessário
+  }
+
   Future<void> fetchOcorrencias() async {
     _setLoading(true);
     try {
       // Carrega histórico do cache
-      _ocorrencias = await _ocorrenciaRepository.getOcorrenciasFromCache();
+      final cached = await _ocorrenciaRepository.getOcorrenciasFromCache();
       // Carrega pendentes
       await fetchPendingOcorrencias();
+      
+      // Combina para exibição
+      _mergeOcorrencias(cached);
       notifyListeners();
       
       // Tenta buscar dados novos do servidor
@@ -73,7 +95,13 @@ class AgentOcorrenciaService extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      _ocorrencias = await _ocorrenciaRepository.fetchOcorrenciasByAgenteFromSupabase(agente.id);
+      final serverList = await _ocorrenciaRepository.fetchOcorrenciasByAgenteFromSupabase(agente.id);
+      
+      // Garante que pendentes estejam atualizados
+      await fetchPendingOcorrencias();
+      
+      // Combina server + pendentes
+      _mergeOcorrencias(serverList);
       notifyListeners();
     } catch (e) {
       AppLogger.warning('Erro ao forçar atualização (possivelmente offline)', e);
@@ -96,15 +124,24 @@ class AgentOcorrenciaService extends ChangeNotifier {
           ocorrenciaToUpload.localImagePaths!.isNotEmpty) {
         for (String path in ocorrenciaToUpload.localImagePaths!) {
           String? publicUrl = await _uploadImage(path, ocorrenciaToUpload.id);
+          
+          // CORREÇÃO: Se falhar o upload, lança exceção para abortar o salvamento
+          // e manter o item na lista de pendentes (offline).
           if (publicUrl != null) {
             finalImageUrls.add(publicUrl);
+            
+            // CACHE MANUAL: Copia a imagem local para o diretório de cache do SmartImage
+            await _cacheImageForOffline(path, publicUrl);
+
+          } else {
+             throw Exception("Falha crítica: Não foi possível fazer upload da imagem $path. Abortando sincronização.");
           }
         }
       }
 
       ocorrenciaToUpload = ocorrenciaToUpload.copyWith(
         fotos_urls: finalImageUrls,
-        localImagePaths: [],
+        localImagePaths: [], // Limpa os caminhos locais pois já subiram (e foram cacheados)
         sincronizado: true,
       );
 
@@ -134,15 +171,111 @@ class AgentOcorrenciaService extends ChangeNotifier {
       
       // Atualiza listas em memória
       await fetchPendingOcorrencias();
-      await forceRefresh();
+      
+      // ATUALIZAÇÃO MANUAL DA LISTA LOCAL
+      final index = _ocorrencias.indexWhere((o) => o.id == ocorrenciaToUpload.id);
+      if (index != -1) {
+        _ocorrencias[index] = ocorrenciaToUpload;
+      } else {
+        _ocorrencias.insert(0, ocorrenciaToUpload);
+      }
+      notifyListeners();
+
+      forceRefresh();
 
     } catch (e) {
-      AppLogger.warning('Falha ao salvar online, salvando localmente.', e);
-      // SE FALHA: Salva na caixa de pendentes
-      await _ocorrenciaRepository.saveToPendingBox(ocorrencia.copyWith(sincronizado: false));
+      AppLogger.warning('Falha ao salvar online. Iniciando persistência local...', e);
+      
+      // SE FALHA: Persiste imagens e salva na caixa de pendentes
+      final ocorrenciaSegura = await _persistLocalImages(ocorrencia);
+      
+      final pendente = ocorrenciaSegura.copyWith(sincronizado: false);
+      await _ocorrenciaRepository.saveToPendingBox(pendente);
       await fetchPendingOcorrencias();
+      
+      // Atualiza lista local
+      final index = _ocorrencias.indexWhere((o) => o.id == pendente.id);
+      if (index != -1) {
+        _ocorrencias[index] = pendente;
+      } else {
+        _ocorrencias.insert(0, pendente);
+      }
+      notifyListeners();
     } finally {
       _setLoading(false);
+    }
+  }
+  
+  /// Copia imagens temporárias para uma pasta segura do app.
+  Future<Ocorrencia> _persistLocalImages(Ocorrencia ocorrencia) async {
+    if (ocorrencia.localImagePaths == null || ocorrencia.localImagePaths!.isEmpty) {
+      return ocorrencia;
+    }
+
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final offlineDir = Directory('${appDir.path}/offline_photos');
+      if (!await offlineDir.exists()) {
+        await offlineDir.create(recursive: true);
+      }
+
+      List<String> newPaths = [];
+      for (String path in ocorrencia.localImagePaths!) {
+        final file = File(path);
+        AppLogger.info("Verificando imagem original: $path");
+        
+        // Verifica se arquivo existe
+        if (await file.exists()) {
+          // Se já está no diretório offline, mantém
+          if (path.startsWith(offlineDir.path)) {
+            newPaths.add(path);
+            continue;
+          }
+          
+          // Copia para lá
+          final fileName = path.split(Platform.pathSeparator).last;
+          final newPath = '${offlineDir.path}/$fileName';
+          final targetFile = File(newPath);
+          
+          if (!await targetFile.exists()) {
+             await file.copy(newPath);
+             AppLogger.info("Imagem copiada para: $newPath");
+          } else {
+             AppLogger.info("Imagem já existe no destino: $newPath");
+          }
+          newPaths.add(newPath);
+        } else {
+          AppLogger.warning("Imagem original NÃO ENCONTRADA: $path");
+          // Mantém path original como fallback, mas provavelmente falhará
+          newPaths.add(path);
+        }
+      }
+      return ocorrencia.copyWith(localImagePaths: newPaths);
+    } catch (e) {
+      AppLogger.error("Erro ao persistir imagens locais: $e");
+      return ocorrencia;
+    }
+  }
+  
+  Future<void> _cacheImageForOffline(String originalPath, String publicUrl) async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final cacheDir = Directory('${docDir.path}/images_cache');
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+
+      final uri = Uri.parse(publicUrl);
+      final filename = uri.pathSegments.last;
+      final targetFile = File('${cacheDir.path}/$filename');
+
+      final sourceFile = File(originalPath);
+      if (await sourceFile.exists()) {
+        await sourceFile.copy(targetFile.path);
+        AppLogger.info('Imagem cacheada manualmente: ${targetFile.path}');
+      }
+    } catch (e) {
+      AppLogger.warning('Falha ao cachear imagem manualmente: $e');
     }
   }
 
@@ -175,10 +308,8 @@ class AgentOcorrenciaService extends ChangeNotifier {
 
     for (var ocorrencia in itemsToSync) {
       try {
-        // Reutiliza saveOcorrencia que já trata upload e remoção de pendentes
         await saveOcorrencia(ocorrencia);
         
-        // Verifica se foi removido dos pendentes para confirmar sucesso
         final stillPending = await _ocorrenciaRepository.getFromPendingBox();
         if (!stillPending.any((o) => o.id == ocorrencia.id)) {
            successCount++;
@@ -189,7 +320,7 @@ class AgentOcorrenciaService extends ChangeNotifier {
     }
 
     _setSyncing(false);
-    await fetchPendingOcorrencias(); // Garante UI atualizada
+    await fetchPendingOcorrencias();
 
     final message = successCount == itemsToSync.length
         ? "Todas as ${itemsToSync.length} ocorrências foram sincronizadas!"

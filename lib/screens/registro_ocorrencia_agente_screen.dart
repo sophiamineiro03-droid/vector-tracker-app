@@ -49,6 +49,7 @@ String formatEnumName(String name) {
   }
 }
 
+
 class RegistroOcorrenciaAgenteScreen extends StatefulWidget {
   final Ocorrencia? ocorrencia;
   final Denuncia? denunciaOrigem;
@@ -66,14 +67,13 @@ class RegistroOcorrenciaAgenteScreen extends StatefulWidget {
   _RegistroOcorrenciaAgenteScreenState createState() =>
       _RegistroOcorrenciaAgenteScreenState();
 }
-
-class _RegistroOcorrenciaAgenteScreenState
-    extends State<RegistroOcorrenciaAgenteScreen> {
+class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgenteScreen> with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   late bool _isNew;
   late bool _isViewMode;
   bool _isSaving = false;
   bool _isGettingLocation = false;
+  bool _waitingForGPS = false; // Controla se estamos esperando o usuário voltar do GPS
   String? _openPanelKey = 'atividade';
   final List<String> _localImagePaths = [];
   final List<XFile> _newlyAddedImages = [];
@@ -134,7 +134,7 @@ class _RegistroOcorrenciaAgenteScreenState
 
   @override
   void initState() {
-    super.initState();
+    super.initState();WidgetsBinding.instance.addObserver(this);
     _isNew = widget.ocorrencia == null;
     _isViewMode = widget.isViewOnly;
     _initializeFormData();
@@ -215,18 +215,27 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   void _populateFromOcorrencia(Ocorrencia oco) {
-// Apenas mude a condição do 'if'
+    // 1. IMAGENS
     if (oco.fotos_urls != null) {
       _localImagePaths.addAll(oco.fotos_urls!);
     }
+    if (oco.localImagePaths != null) {
+      _localImagePaths.addAll(oco.localImagePaths!);
+    }
+
+    // 2. DADOS BÁSICOS
     _dataAtividadeController.text = oco.data_atividade != null
         ? DateFormat('dd/MM/yyyy').format(oco.data_atividade!)
         : '';
     _currentLat = oco.latitude;
     _currentLng = oco.longitude;
     _numeroPITController.text = oco.numero_pit ?? '';
-    _municipioController.text = oco.municipioNome ?? oco.municipio_id_ui ?? '';
 
+    if (oco.municipioNome != null && oco.municipioNome!.isNotEmpty) {
+      _municipioController.text = oco.municipioNome!;
+    } else if (oco.municipio_id_ui != null && oco.municipio_id_ui!.isNotEmpty) {
+      _municipioController.text = oco.municipio_id_ui!;
+    }
 
     if (oco.localidade_id != null) {
       _selectedLocalidadeId = oco.localidade_id;
@@ -238,21 +247,38 @@ class _RegistroOcorrenciaAgenteScreenState
     _numeroController.text = oco.numero ?? '';
     _complementoController.text = oco.complemento ?? '';
     _nomeMoradorController.text = oco.nome_morador ?? '';
-    _numBarbeirosIntraController.text =
-        oco.barbeiros_intradomicilio?.toString() ?? '0';
-    _numBarbeirosPeriController.text =
-        oco.barbeiros_peridomicilio?.toString() ?? '0';
+
+    // 3. ATIVIDADES (COM PROTEÇÃO TOTAL)
+    _tiposAtividade.clear();
+
+    // Tenta pegar o que veio do banco
+    if (oco.tipo_atividade != null) {
+      _tiposAtividade.addAll(oco.tipo_atividade!);
+    }
+
+    // --- PROTEÇÃO: Se o banco falhou na lista, mas tem dados, força a marcação ---
+
+    // Se tem pendência registrada, garante que é PESQUISA
+    if (oco.pendencia_pesquisa != null) {
+      _tiposAtividade.add(TipoAtividade.pesquisa);
+    }
+
+    // Se tem número de PIT, garante que é ATENDIMENTO AO PIT
+    if (oco.numero_pit != null && oco.numero_pit!.isNotEmpty) {
+      _tiposAtividade.add(TipoAtividade.atendimentoPIT);
+    }
+
+    // Se tem inseticida ou cargas, garante que é BORRIFAÇÃO
+    if ((oco.inseticida != null && oco.inseticida!.isNotEmpty) || (oco.numero_cargas ?? 0) > 0) {
+      _tiposAtividade.add(TipoAtividade.borrifacao);
+    }
+
+    // 4. BORRIFAÇÃO
     _inseticidaController.text = oco.inseticida ?? '';
     _numCargasController.text = oco.numero_cargas?.toString() ?? '0';
     _codigoEtiquetaController.text = oco.codigo_etiqueta ?? '';
 
-    _tiposAtividade.clear();
-    if (oco.tipo_atividade != null) {
-      for (var tipo in oco.tipo_atividade!) {
-        _tiposAtividade.add(tipo);
-      }
-    }
-
+    // 5. DETALHES DO IMÓVEL
     _situacaoImovel = oco.situacao_imovel;
     _pendenciaPesquisa = oco.pendencia_pesquisa;
     _pendenciaBorrifacao = oco.pendencia_borrifacao;
@@ -260,8 +286,48 @@ class _RegistroOcorrenciaAgenteScreenState
     _tipoTeto = oco.tipo_teto;
     _melhoriaHabitacional = oco.melhoria_habitacional;
     _numeroAnexo = oco.numero_anexo;
-  }
 
+    // 6. CAPTURA E VESTÍGIOS (Intra e Peri)
+
+    // Intradomicílio
+    _numBarbeirosIntraController.text = oco.barbeiros_intradomicilio?.toString() ?? '0';
+    if (oco.vestigios_intradomicilio != null) {
+      _restoreVestigios(oco.vestigios_intradomicilio!, _vestigiosIntra);
+    }
+
+    // Se tem barbeiros > 0, marca Triatomíneo.
+    if ((oco.barbeiros_intradomicilio ?? 0) > 0) {
+      _capturaIntraStatus = CapturaStatus.triatomineo;
+    } else {
+      _capturaIntraStatus = CapturaStatus.nenhum;
+    }
+
+    // Peridomicílio
+    _numBarbeirosPeriController.text = oco.barbeiros_peridomicilio?.toString() ?? '0';
+    if (oco.vestigios_peridomicilio != null) {
+      _restoreVestigios(oco.vestigios_peridomicilio!, _vestigiosPeri);
+    }
+
+    if ((oco.barbeiros_peridomicilio ?? 0) > 0) {
+      _capturaPeriStatus = CapturaStatus.triatomineo;
+    } else {
+      _capturaPeriStatus = CapturaStatus.nenhum;
+    }
+  }
+  void _restoreVestigios(String savedString, Map<String, bool> map) {
+    map.updateAll((key, val) => false);
+    if (savedString == 'Nenhum' || savedString.isEmpty) {
+      if (map.containsKey('Nenhum')) map['Nenhum'] = true;
+    } else {
+      if (map.containsKey('Nenhum')) map['Nenhum'] = false;
+      final parts = savedString.split(', ');
+      for (var p in parts) {
+        if (map.containsKey(p)) {
+          map[p] = true;
+        }
+      }
+    }
+  }
   void _populateFromDenuncia(Denuncia den) {
     _tiposAtividade.clear();
     // Garante que o tipo de atividade padrão seja 'pesquisa' ao atender uma denúncia
@@ -292,6 +358,7 @@ class _RegistroOcorrenciaAgenteScreenState
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _dataAtividadeController.dispose();
     _numeroPITController.dispose();
     _municipioController.dispose();
@@ -309,7 +376,13 @@ class _RegistroOcorrenciaAgenteScreenState
     _agenteController.dispose();
     super.dispose();
   }
-
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _waitingForGPS) {
+      _waitingForGPS = false;
+      _getCurrentLocationAndFillAddress();
+    }
+  }
   Future<void> _saveForm() async {
     if (_isViewMode) return;
 
@@ -569,7 +642,7 @@ class _RegistroOcorrenciaAgenteScreenState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Contexto da Denúncia Original', // Título mais claro
+              'Contexto da Denúncia', // Título mais claro
               style: theme.textTheme.titleLarge
                   ?.copyWith(fontWeight: FontWeight.bold, color: Colors.black87),
             ),
@@ -1252,6 +1325,48 @@ class _RegistroOcorrenciaAgenteScreenState
   }
 
   Future<void> _getCurrentLocationAndFillAddress() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      if (!mounted) return;
+
+      // Mostra o diálogo e espera a decisão do usuário
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('GPS Desativado'),
+          content: const Text('A localização é necessária para registrar este imóvel. Por favor, ative o GPS.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Geolocator.openLocationSettings();
+                Navigator.pop(context);
+              },
+              child: const Text('Ativar GPS'),
+            ),
+          ],
+        ),
+      );
+
+      // --- MELHORIA AQUI ---
+      // Ao fechar o diálogo (seja cancelando ou voltando das configurações),
+      // verificamos de novo. Se ligou, prossegue automaticamente!
+      serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('GPS ainda desligado. Não foi possível obter a localização.')),
+          );
+        }
+        return;
+      }
+    }
+
+    // Se chegou aqui, o GPS está ligado (ou já estava, ou o usuário ligou agora)
     setState(() => _isGettingLocation = true);
     try {
       final position = await LocationUtil.getCurrentPosition();
@@ -1270,23 +1385,27 @@ class _RegistroOcorrenciaAgenteScreenState
           final p = placemarks.first;
           setState(() {
             _enderecoController.text = p.street ?? _enderecoController.text;
-            _numeroController.text =
-                p.subThoroughfare ?? _numeroController.text;
-            _municipioController.text =
-                p.subAdministrativeArea ?? _municipioController.text;
+            _numeroController.text = p.subThoroughfare ?? _numeroController.text;
+            _municipioController.text = p.subAdministrativeArea ?? _municipioController.text;
           });
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Endereço preenchido com a localização.')));
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Localização obtida com sucesso!'), backgroundColor: Colors.green));
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Não foi possível obter a localização: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao obter localização: $e'), backgroundColor: Colors.red),
+        );
+      }
     } finally {
-      setState(() => _isGettingLocation = false);
+      if (mounted) setState(() => _isGettingLocation = false);
     }
   }
+
 
   void _handleVestigiosChange(
       Map<String, bool> vestigios, String key, bool value) {

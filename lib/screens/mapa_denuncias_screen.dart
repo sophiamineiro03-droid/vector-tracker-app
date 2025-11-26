@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -61,8 +62,8 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
   final Completer<GoogleMapController> _controller = Completer();
   Set<Marker> _markers = {};
   
-  // Posição inicial fixa no Piauí
-  CameraPosition _initialPosition = const CameraPosition(target: LatLng(-7.5, -43.0), zoom: 6.5);
+  // Posição inicial fixa em Teresina (já que os pins fakes estarão lá)
+  CameraPosition _initialPosition = const CameraPosition(target: LatLng(-5.0919, -42.8034), zoom: 11.5);
 
   @override
   void initState() {
@@ -95,6 +96,7 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
 
      final List<MapItem> items = [];
 
+     // 1. Itens Reais
      final pendentes = denunciaService.items
          .map((d) => Denuncia.fromMap(d))
          .where((d) => (d.status?.toLowerCase() != 'atendida') && d.latitude != null && d.longitude != null)
@@ -105,8 +107,128 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
          .where((o) => o.latitude != null && o.longitude != null)
          .map((o) => MapItem.fromOcorrencia(o));
      items.addAll(realizados);
+     
+     // 2. Itens Fake (Teresina)
+     items.addAll(_generateFakeItems());
 
      _clusterManager.setItems(items);
+  }
+  
+  List<MapItem> _generateFakeItems() {
+    final random = Random();
+    final List<MapItem> fakeItems = [];
+    
+    // Lista de imagens disponíveis nos assets
+    final images = [
+      'assets/barbeiro.jpg',
+      'assets/barbeiro04.jpg',
+      'assets/Barbeiro_1.jpeg',
+      'assets/barbeiro_2.jpg',
+      'assets/barbeiro_3.webp',
+      'assets/Barbeiro_6.png'
+    ];
+
+    // Lista de Locais REAIS com Coordenadas EXATAS (Bem espalhados por Teresina)
+    // Zona Norte, Sul, Leste, Sudeste e Centro. Longe do Ininga.
+    final locaisReais = [
+       // Centro / Centro-Sul
+       {'lat': -5.0920, 'lng': -42.8045, 'rua': 'Av. Frei Serafim', 'bairro': 'Centro'},
+       {'lat': -5.0850, 'lng': -42.8200, 'rua': 'Av. Maranhão', 'bairro': 'Centro'},
+       {'lat': -5.0550, 'lng': -42.8180, 'rua': 'Av. Campos Sales', 'bairro': 'Centro'},
+
+       // Zona Norte (Mocambinho, Aeroporto, Buenos Aires)
+       {'lat': -5.0400, 'lng': -42.8250, 'rua': 'Av. Centenário', 'bairro': 'Aeroporto'},
+       {'lat': -5.0250, 'lng': -42.8280, 'rua': 'Av. Duque de Caxias', 'bairro': 'Buenos Aires'},
+       {'lat': -5.0650, 'lng': -42.8380, 'rua': 'Rua Rui Barbosa', 'bairro': 'Matadouro'},
+
+       // Zona Sul (Vermelha, Tabuleta, Parque Piauí, Promorar)
+       {'lat': -5.1050, 'lng': -42.8100, 'rua': 'Av. Miguel Rosa', 'bairro': 'Vermelha'},
+       {'lat': -5.1180, 'lng': -42.8150, 'rua': 'Av. Barão de Gurguéia', 'bairro': 'Tabuleta'},
+       {'lat': -5.1350, 'lng': -42.7980, 'rua': 'Av. Henry Wall de Carvalho', 'bairro': 'Parque Piauí'},
+       {'lat': -5.1450, 'lng': -42.7920, 'rua': 'Av. Walfrido Salmito', 'bairro': 'Promorar'},
+       {'lat': -5.1080, 'lng': -42.8060, 'rua': 'Av. Valter Alencar', 'bairro': 'Monte Castelo'},
+
+       // Zona Leste / Sudeste (Dirceu, Pedra Mole, Planalto Uruguai - Longe do Ininga)
+       {'lat': -5.1030, 'lng': -42.7550, 'rua': 'Av. Joaquim Nelson', 'bairro': 'Dirceu Arcoverde'},
+       {'lat': -5.0850, 'lng': -42.7300, 'rua': 'Av. Zequinha Freire', 'bairro': 'Planalto Uruguai'},
+       {'lat': -5.0600, 'lng': -42.7450, 'rua': 'Av. Presidente Kennedy', 'bairro': 'Pedra Mole'},
+       {'lat': -5.0950, 'lng': -42.7650, 'rua': 'Rua Dep. Paulo Ferraz', 'bairro': 'Beira Rio'},
+    ];
+
+    // Descrições mais simples e realistas (feitas por moradores)
+    final descricoes = [
+      'Achei esse bicho estranho no quintal.',
+      'Encontrei um barbeiro na parede da sala.',
+      'Tem um inseto parecido com barbeiro aqui em casa.',
+      'Vi esse bicho perto da cama.',
+      'Apareceu esse inseto no terraço.',
+      'Suspeita de barbeiro no quarto.',
+      'Encontrei esse bicho morto no chão da cozinha.'
+    ];
+
+    for (int i = 0; i < locaisReais.length; i++) {
+       final local = locaisReais[i];
+       
+       final double lat = local['lat'] as double;
+       final double lng = local['lng'] as double;
+       final String rua = local['rua'] as String;
+       final String bairro = local['bairro'] as String;
+       
+       final img = images[random.nextInt(images.length)];
+       final numero = (random.nextInt(9000) + 10).toString();
+       final date = DateTime.now().subtract(Duration(days: random.nextInt(30)));
+       final descricao = descricoes[random.nextInt(descricoes.length)]; // Descrição aleatória
+
+       // Tipo do Pin: 0 = Pendente (Laranja), 1 = Atendida (Verde), 2 = Proativo (Azul)
+       final type = i % 3; // Distribui uniformemente os tipos
+
+       if (type == 0) {
+         // Denúncia Pendente
+         fakeItems.add(MapItem.fromDenuncia(Denuncia(
+           id: 'fake_d_$i',
+           status: 'Pendente',
+           latitude: lat,
+           longitude: lng,
+           rua: rua, // Rua correta do local
+           bairro: bairro,
+           numero: numero,
+           descricao: descricao, // Descrição realista
+           foto_url: img,
+           createdAt: date,
+           localidadeNome: bairro,
+         )));
+       } else if (type == 1) {
+         // Denúncia Atendida (Ocorrência vinculada a denúncia)
+         fakeItems.add(MapItem.fromOcorrencia(Ocorrencia(
+           id: 'fake_o_$i',
+           denuncia_id: 'fake_d_origin_$i',
+           sincronizado: true,
+           latitude: lat,
+           longitude: lng,
+           endereco: '$rua, $bairro', // Endereço correto
+           numero: numero,
+           data_atividade: date,
+           fotos_urls: [img],
+           nome_morador: 'Morador Teste $i',
+         )));
+       } else {
+         // Registro Proativo (Ocorrência sem denúncia)
+         fakeItems.add(MapItem.fromOcorrencia(Ocorrencia(
+           id: 'fake_p_$i',
+           denuncia_id: null,
+           sincronizado: true,
+           latitude: lat,
+           longitude: lng,
+           endereco: '$rua, $bairro', // Endereço correto
+           numero: numero,
+           data_atividade: date,
+           fotos_urls: [img],
+           nome_morador: 'Morador Teste $i',
+         )));
+       }
+    }
+
+    return fakeItems;
   }
   
   ClusterManager _initClusterManager() {
@@ -114,7 +236,8 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
       [],
       _updateMarkers,
       markerBuilder: _markerBuilder,
-      // Níveis de zoom
+      // Aumentado stopClusteringZoom para evitar agrupar cedo demais
+      stopClusteringZoom: 11.0, 
       levels: [1, 4.25, 6.75, 8.25, 11.5, 14.5, 16.0, 16.5, 18.0, 20.0], 
     );
   }
@@ -158,9 +281,6 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
         final double latDiff = (bounds.northeast.latitude - bounds.southwest.latitude).abs();
         final double lngDiff = (bounds.northeast.longitude - bounds.southwest.longitude).abs();
 
-        // AJUSTE: Tolerância muito baixa (0.00001 ~ 1 metro).
-        // O mapa só vai mostrar a lista se os pontos estiverem EXATAMENTE no mesmo lugar.
-        // Caso contrário, ele vai tentar dar zoom máximo para separar os pins (mostrar o máximo de pins possível).
         if (latDiff < 0.00001 && lngDiff < 0.00001) {
            _showClusterItemsList(context, cluster.items);
         } else {
@@ -244,7 +364,7 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const GradientAppBar(title: 'Mapa Geral'),
+      appBar: const GradientAppBar(title: 'Mapa'), // Alterado de 'Mapa Geral' para 'Mapa'
       body: Stack(
         children: [
           GoogleMap(

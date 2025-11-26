@@ -29,7 +29,8 @@ class OcorrenciaRepository {
 
       await _cacheBox.clear();
       for (var oc in ocorrencias) {
-        await _cacheBox.put(oc.id, oc.toMap());
+        // CORREÇÃO: Usar toLocalMap para salvar no cache local com todos os campos extras
+        await _cacheBox.put(oc.id, oc.toLocalMap());
       }
       return ocorrencias;
     } catch (e) {
@@ -64,7 +65,8 @@ class OcorrenciaRepository {
   }
 
   Future<void> saveToPendingBox(Ocorrencia ocorrencia) async {
-    await _pendingBox.put(ocorrencia.id, ocorrencia.toMap());
+    // CORREÇÃO: Usar toLocalMap para persistir caminhos de imagens locais e outros dados offline
+    await _pendingBox.put(ocorrencia.id, ocorrencia.toLocalMap());
   }
 
   Future<List<Ocorrencia>> getFromPendingBox() async {

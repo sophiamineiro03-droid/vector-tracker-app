@@ -37,6 +37,18 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^3.0.0
   flutter_native_splash: ^2.4.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "icon_v" # Nome novo
+  ios: true
+  image_path: "assets/logo_v.jpeg"
+  min_sdk_android: 21
+  # Como é uma imagem JPEG (sem transparência) e quadrada, 
+  # usá-la como foreground vai recortá-la no formato do ícone (círculo/quadrado)
+  adaptive_icon_background: "#FFFFFF" 
+  adaptive_icon_foreground: "assets/logo_v.jpeg"
+  remove_alpha_ios: true
 
 flutter:
   uses-material-design: true
@@ -44,7 +56,7 @@ flutter:
     - .env
     - assets/
 
-# Configuração da "mágica" para usar a imagem que VOCÊ mandou
+# Configuração da tela de abertura
 flutter_native_splash:
   color: "#FFFFFF"
   image: assets/white_splash.png

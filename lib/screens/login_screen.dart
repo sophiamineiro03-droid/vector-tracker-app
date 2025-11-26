@@ -256,19 +256,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                                 : const Text('Entrar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           ),
-                          
-                          if (_selectedTab == 1) ...[
-                            const SizedBox(height: 16.0),
-                            TextButton(
-                              onPressed: () {
-                                Navigator.pushNamed(context, '/agent_signup');
-                              },
-                              child: const Text(
-                                'Não tem conta? Cadastre-se',
-                                style: TextStyle(fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ),
