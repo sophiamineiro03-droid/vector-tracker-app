@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_cluster_manager_2/google_maps_cluster_manager_2.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart' hide Cluster, ClusterManager;
 import 'package:intl/intl.dart';
@@ -34,7 +34,7 @@ class MapItem with ClusterItem {
       }
     } else {
       if ((denuncia!.status?.toLowerCase() ?? '') == 'atendida') {
-         return BitmapDescriptor.hueGreen;
+        return BitmapDescriptor.hueGreen;
       }
       return BitmapDescriptor.hueOrange;
     }
@@ -61,9 +61,9 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
   late ClusterManager _clusterManager;
   final Completer<GoogleMapController> _controller = Completer();
   Set<Marker> _markers = {};
-  
-  // Posição inicial fixa em Teresina (já que os pins fakes estarão lá)
-  CameraPosition _initialPosition = const CameraPosition(target: LatLng(-5.0919, -42.8034), zoom: 11.5);
+
+  // Posição inicial temporária (será atualizada)
+  CameraPosition _initialPosition = const CameraPosition(target: LatLng(-14.2350, -51.9253), zoom: 4); // Brasil
 
   @override
   void initState() {
@@ -74,171 +74,105 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
 
   Future<void> _loadData() async {
     final context = this.context;
+
+    // 1. Busca dados do Agente para pegar o Município
     final agenteRepo = Provider.of<AgenteRepository>(context, listen: false);
     final agente = await agenteRepo.getCurrentAgent();
     final localidadeIds = agente?.localidades.map((l) => l.id).toList();
+    final municipioId = agente?.municipioId; // << IMPORTANTE
 
     if (!mounted) return;
-    
+
+    // 2. Carrega Ocorrências (Meu Trabalho)
     final agentService = Provider.of<AgentOcorrenciaService>(context, listen: false);
     await agentService.fetchOcorrencias();
-    
+
+    // 3. Carrega Denúncias (Pendências) filtrando pelo MUNICÍPIO
     final denunciaService = Provider.of<DenunciaService>(context, listen: false);
-    await denunciaService.fetchItems(localidadeIds: localidadeIds);
+    await denunciaService.fetchItems(
+      localidadeIds: localidadeIds,
+      municipioId: municipioId, // << Filtra pelo município todo
+    );
 
     _updateMapItems();
   }
 
   void _updateMapItems() {
-     if (!mounted) return;
-     final agentService = Provider.of<AgentOcorrenciaService>(context, listen: false);
-     final denunciaService = Provider.of<DenunciaService>(context, listen: false);
+    if (!mounted) return;
+    final agentService = Provider.of<AgentOcorrenciaService>(context, listen: false);
+    final denunciaService = Provider.of<DenunciaService>(context, listen: false);
 
-     final List<MapItem> items = [];
+    final List<MapItem> items = [];
 
-     // 1. Itens Reais
-     final pendentes = denunciaService.items
-         .map((d) => Denuncia.fromMap(d))
-         .where((d) => (d.status?.toLowerCase() != 'atendida') && d.latitude != null && d.longitude != null)
-         .map((d) => MapItem.fromDenuncia(d));
-     items.addAll(pendentes);
+    // 1. Denúncias Pendentes Reais
+    final pendentes = denunciaService.items
+        .map((d) => Denuncia.fromMap(d))
+        .where((d) => (d.status?.toLowerCase() != 'atendida') && d.latitude != null && d.longitude != null)
+        .map((d) => MapItem.fromDenuncia(d));
+    items.addAll(pendentes);
 
-     final realizados = agentService.ocorrencias
-         .where((o) => o.latitude != null && o.longitude != null)
-         .map((o) => MapItem.fromOcorrencia(o));
-     items.addAll(realizados);
-     
-     // 2. Itens Fake (Teresina)
-     items.addAll(_generateFakeItems());
+    // 2. Ocorrências Realizadas Reais
+    final realizados = agentService.ocorrencias
+        .where((o) => o.latitude != null && o.longitude != null)
+        .map((o) => MapItem.fromOcorrencia(o));
+    items.addAll(realizados);
 
-     _clusterManager.setItems(items);
+    // REMOVIDO: Geração de dados falsos (fakes) para não poluir seu mapa real
+    // items.addAll(_generateFakeItems());
+
+    _clusterManager.setItems(items);
+
+    // AJUSTA A CÂMERA
+    if (items.isNotEmpty) {
+      _zoomToFit(items);
+    } else {
+      _zoomToCurrentLocation();
+    }
   }
-  
-  List<MapItem> _generateFakeItems() {
-    final random = Random();
-    final List<MapItem> fakeItems = [];
-    
-    // Lista de imagens disponíveis nos assets
-    final images = [
-      'assets/barbeiro.jpg',
-      'assets/barbeiro04.jpg',
-      'assets/Barbeiro_1.jpeg',
-      'assets/barbeiro_2.jpg',
-      'assets/barbeiro_3.webp',
-      'assets/Barbeiro_6.png'
-    ];
 
-    // Lista de Locais REAIS com Coordenadas EXATAS (Bem espalhados por Teresina)
-    // Zona Norte, Sul, Leste, Sudeste e Centro. Longe do Ininga.
-    final locaisReais = [
-       // Centro / Centro-Sul
-       {'lat': -5.0920, 'lng': -42.8045, 'rua': 'Av. Frei Serafim', 'bairro': 'Centro'},
-       {'lat': -5.0850, 'lng': -42.8200, 'rua': 'Av. Maranhão', 'bairro': 'Centro'},
-       {'lat': -5.0550, 'lng': -42.8180, 'rua': 'Av. Campos Sales', 'bairro': 'Centro'},
+  Future<void> _zoomToFit(List<MapItem> items) async {
+    if (items.isEmpty) return;
 
-       // Zona Norte (Mocambinho, Aeroporto, Buenos Aires)
-       {'lat': -5.0400, 'lng': -42.8250, 'rua': 'Av. Centenário', 'bairro': 'Aeroporto'},
-       {'lat': -5.0250, 'lng': -42.8280, 'rua': 'Av. Duque de Caxias', 'bairro': 'Buenos Aires'},
-       {'lat': -5.0650, 'lng': -42.8380, 'rua': 'Rua Rui Barbosa', 'bairro': 'Matadouro'},
+    double minLat = items.first.location.latitude;
+    double minLng = items.first.location.longitude;
+    double maxLat = items.first.location.latitude;
+    double maxLng = items.first.location.longitude;
 
-       // Zona Sul (Vermelha, Tabuleta, Parque Piauí, Promorar)
-       {'lat': -5.1050, 'lng': -42.8100, 'rua': 'Av. Miguel Rosa', 'bairro': 'Vermelha'},
-       {'lat': -5.1180, 'lng': -42.8150, 'rua': 'Av. Barão de Gurguéia', 'bairro': 'Tabuleta'},
-       {'lat': -5.1350, 'lng': -42.7980, 'rua': 'Av. Henry Wall de Carvalho', 'bairro': 'Parque Piauí'},
-       {'lat': -5.1450, 'lng': -42.7920, 'rua': 'Av. Walfrido Salmito', 'bairro': 'Promorar'},
-       {'lat': -5.1080, 'lng': -42.8060, 'rua': 'Av. Valter Alencar', 'bairro': 'Monte Castelo'},
-
-       // Zona Leste / Sudeste (Dirceu, Pedra Mole, Planalto Uruguai - Longe do Ininga)
-       {'lat': -5.1030, 'lng': -42.7550, 'rua': 'Av. Joaquim Nelson', 'bairro': 'Dirceu Arcoverde'},
-       {'lat': -5.0850, 'lng': -42.7300, 'rua': 'Av. Zequinha Freire', 'bairro': 'Planalto Uruguai'},
-       {'lat': -5.0600, 'lng': -42.7450, 'rua': 'Av. Presidente Kennedy', 'bairro': 'Pedra Mole'},
-       {'lat': -5.0950, 'lng': -42.7650, 'rua': 'Rua Dep. Paulo Ferraz', 'bairro': 'Beira Rio'},
-    ];
-
-    // Descrições mais simples e realistas (feitas por moradores)
-    final descricoes = [
-      'Achei esse bicho estranho no quintal.',
-      'Encontrei um barbeiro na parede da sala.',
-      'Tem um inseto parecido com barbeiro aqui em casa.',
-      'Vi esse bicho perto da cama.',
-      'Apareceu esse inseto no terraço.',
-      'Suspeita de barbeiro no quarto.',
-      'Encontrei esse bicho morto no chão da cozinha.'
-    ];
-
-    for (int i = 0; i < locaisReais.length; i++) {
-       final local = locaisReais[i];
-       
-       final double lat = local['lat'] as double;
-       final double lng = local['lng'] as double;
-       final String rua = local['rua'] as String;
-       final String bairro = local['bairro'] as String;
-       
-       final img = images[random.nextInt(images.length)];
-       final numero = (random.nextInt(9000) + 10).toString();
-       final date = DateTime.now().subtract(Duration(days: random.nextInt(30)));
-       final descricao = descricoes[random.nextInt(descricoes.length)]; // Descrição aleatória
-
-       // Tipo do Pin: 0 = Pendente (Laranja), 1 = Atendida (Verde), 2 = Proativo (Azul)
-       final type = i % 3; // Distribui uniformemente os tipos
-
-       if (type == 0) {
-         // Denúncia Pendente
-         fakeItems.add(MapItem.fromDenuncia(Denuncia(
-           id: 'fake_d_$i',
-           status: 'Pendente',
-           latitude: lat,
-           longitude: lng,
-           rua: rua, // Rua correta do local
-           bairro: bairro,
-           numero: numero,
-           descricao: descricao, // Descrição realista
-           foto_url: img,
-           createdAt: date,
-           localidadeNome: bairro,
-         )));
-       } else if (type == 1) {
-         // Denúncia Atendida (Ocorrência vinculada a denúncia)
-         fakeItems.add(MapItem.fromOcorrencia(Ocorrencia(
-           id: 'fake_o_$i',
-           denuncia_id: 'fake_d_origin_$i',
-           sincronizado: true,
-           latitude: lat,
-           longitude: lng,
-           endereco: '$rua, $bairro', // Endereço correto
-           numero: numero,
-           data_atividade: date,
-           fotos_urls: [img],
-           nome_morador: 'Morador Teste $i',
-         )));
-       } else {
-         // Registro Proativo (Ocorrência sem denúncia)
-         fakeItems.add(MapItem.fromOcorrencia(Ocorrencia(
-           id: 'fake_p_$i',
-           denuncia_id: null,
-           sincronizado: true,
-           latitude: lat,
-           longitude: lng,
-           endereco: '$rua, $bairro', // Endereço correto
-           numero: numero,
-           data_atividade: date,
-           fotos_urls: [img],
-           nome_morador: 'Morador Teste $i',
-         )));
-       }
+    for (var item in items) {
+      final lat = item.location.latitude;
+      final lng = item.location.longitude;
+      if (lat < minLat) minLat = lat;
+      if (lng < minLng) minLng = lng;
+      if (lat > maxLat) maxLat = lat;
+      if (lng > maxLng) maxLng = lng;
     }
 
-    return fakeItems;
+    final bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+
+    final controller = await _controller.future;
+    controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 50));
   }
-  
+
+  Future<void> _zoomToCurrentLocation() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition();
+      final controller = await _controller.future;
+      controller.animateCamera(CameraUpdate.newLatLngZoom(LatLng(pos.latitude, pos.longitude), 14));
+    } catch (e) {
+      // Se falhar GPS, mantém visão geral
+    }
+  }
+
   ClusterManager _initClusterManager() {
     return ClusterManager<MapItem>(
       [],
       _updateMarkers,
       markerBuilder: _markerBuilder,
-      // Aumentado stopClusteringZoom para evitar agrupar cedo demais
-      stopClusteringZoom: 11.0, 
-      levels: [1, 4.25, 6.75, 8.25, 11.5, 14.5, 16.0, 16.5, 18.0, 20.0], 
+      stopClusteringZoom: 13.0, // Ajustado para agrupar menos
+      levels: [1, 4.25, 6.75, 8.25, 11.5, 14.5, 16.0, 16.5, 18.0, 20.0],
     );
   }
 
@@ -277,14 +211,14 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
       onTap: () async {
         final controller = await _controller.future;
         final bounds = _boundsFromCluster(cluster);
-        
+
         final double latDiff = (bounds.northeast.latitude - bounds.southwest.latitude).abs();
         final double lngDiff = (bounds.northeast.longitude - bounds.southwest.longitude).abs();
 
         if (latDiff < 0.00001 && lngDiff < 0.00001) {
-           _showClusterItemsList(context, cluster.items);
+          _showClusterItemsList(context, cluster.items);
         } else {
-           controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 40.0));
+          controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 40.0));
         }
       },
     );
@@ -297,65 +231,70 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
       backgroundColor: Colors.transparent,
       builder: (context) {
         return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.5,
-          minChildSize: 0.3,
-          maxChildSize: 0.8,
-          builder: (context, scrollController) {
-             return Container(
-               decoration: const BoxDecoration(
+            expand: false,
+            initialChildSize: 0.5,
+            minChildSize: 0.3,
+            maxChildSize: 0.8,
+            builder: (context, scrollController) {
+              return Container(
+                decoration: const BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-               ),
-               padding: const EdgeInsets.only(top: 16),
-               child: Column(
-                 children: [
-                   Text(
-                     '${items.length} Registros neste local exato', 
-                     style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                   ),
-                   const Divider(),
-                   Expanded(
-                     child: ListView.separated(
-                       controller: scrollController,
-                       padding: const EdgeInsets.all(16),
-                       itemCount: items.length,
-                       separatorBuilder: (_, __) => const Divider(),
-                       itemBuilder: (context, index) {
+                ),
+                padding: const EdgeInsets.only(top: 16),
+                child: Column(
+                  children: [
+                    Text(
+                      '${items.length} Registros neste local',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    const Divider(),
+                    Expanded(
+                      child: ListView.separated(
+                        controller: scrollController,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: items.length,
+                        separatorBuilder: (_, __) => const Divider(),
+                        itemBuilder: (context, index) {
                           final item = items.elementAt(index);
                           if (item.isOcorrencia) {
-                             final oc = item.ocorrencia!;
-                             final isProativo = oc.denuncia_id == null;
-                             return ListTile(
-                               leading: Icon(Icons.assignment_turned_in, color: isProativo ? Colors.blue : Colors.green),
-                               title: Text(isProativo ? 'Registro Proativo' : 'Denúncia Atendida'),
-                               subtitle: Text(DateFormat('dd/MM/yyyy').format(oc.data_atividade ?? DateTime.now())),
-                               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                               onTap: () {
-                                 Navigator.pop(context); // Fecha a lista
-                                 _showOcorrenciaDetails(context, oc);
-                               },
-                             );
+                            final oc = item.ocorrencia!;
+                            final isProativo = oc.denuncia_id == null;
+                            // NOME DA LOCALIDADE NA LISTA DE CLUSTER
+                            final title = oc.nome_localidade != null && oc.nome_localidade!.isNotEmpty
+                                ? '${oc.nome_localidade} (Atendida)'
+                                : (isProativo ? 'Registro Proativo' : 'Denúncia Atendida');
+
+                            return ListTile(
+                              leading: Icon(Icons.assignment_turned_in, color: isProativo ? Colors.blue : Colors.green),
+                              title: Text(title),
+                              subtitle: Text(DateFormat('dd/MM/yyyy').format(oc.data_atividade ?? DateTime.now())),
+                              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                              onTap: () {
+                                Navigator.pop(context); // Fecha a lista
+                                _showOcorrenciaDetails(context, oc);
+                              },
+                            );
                           } else {
-                             final den = item.denuncia!;
-                             return ListTile(
-                               leading: const Icon(Icons.location_on, color: Colors.orange),
-                               title: const Text('Denúncia Pendente'),
-                               subtitle: Text(DateFormat('dd/MM/yyyy').format(den.createdAt ?? DateTime.now())),
-                               trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                               onTap: () {
-                                  Navigator.pop(context); // Fecha a lista
-                                  _showDenunciaDetails(context, den);
-                               },
-                             );
+                            final den = item.denuncia!;
+                            return ListTile(
+                              leading: const Icon(Icons.location_on, color: Colors.orange),
+                              title: const Text('Denúncia Pendente'),
+                              subtitle: Text(DateFormat('dd/MM/yyyy').format(den.createdAt ?? DateTime.now())),
+                              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                              onTap: () {
+                                Navigator.pop(context); // Fecha a lista
+                                _showDenunciaDetails(context, den);
+                              },
+                            );
                           }
-                       },
-                     ),
-                   ),
-                 ],
-               ),
-             );
-          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
         );
       },
     );
@@ -364,7 +303,7 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const GradientAppBar(title: 'Mapa'), // Alterado de 'Mapa Geral' para 'Mapa'
+      appBar: const GradientAppBar(title: 'Mapa da Área'),
       body: Stack(
         children: [
           GoogleMap(
@@ -391,9 +330,9 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                     _legendItem(Colors.orange, 'Pendente'),
-                     _legendItem(Colors.green, 'Atendida'),
-                     _legendItem(Colors.blue, 'Proativo'),
+                    _legendItem(Colors.orange, 'Pendente'),
+                    _legendItem(Colors.green, 'Atendida'),
+                    _legendItem(Colors.blue, 'Proativo'),
                   ],
                 ),
               ),
@@ -403,7 +342,7 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
       ),
     );
   }
-  
+
   Widget _legendItem(Color color, String label) {
     return Row(
       children: [
@@ -451,9 +390,9 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
                       child: denuncia.foto_url != null
                           ? SmartImage(imageSource: denuncia.foto_url!, fit: BoxFit.cover)
                           : Container(
-                              color: Colors.grey[200],
-                              child: const Center(child: Icon(Icons.image_not_supported, size: 50, color: Colors.grey)),
-                            ),
+                        color: Colors.grey[200],
+                        child: const Center(child: Icon(Icons.image_not_supported, size: 50, color: Colors.grey)),
+                      ),
                     ),
                   ),
                   Padding(
@@ -488,24 +427,24 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
 
   // --- DETALHES DA OCORRÊNCIA ---
   void _showOcorrenciaDetails(BuildContext context, Ocorrencia ocorrencia) {
-     final isProativo = ocorrencia.denuncia_id == null;
-     final color = isProativo ? Colors.blue : Colors.green;
-     final title = isProativo ? 'Registro Proativo' : 'Denúncia Atendida';
-     
-     final formattedDate = ocorrencia.data_atividade != null
+    final isProativo = ocorrencia.denuncia_id == null;
+    final color = isProativo ? Colors.blue : Colors.green;
+    final title = isProativo ? 'Registro Proativo' : 'Denúncia Atendida';
+
+    final formattedDate = ocorrencia.data_atividade != null
         ? DateFormat('dd/MM/yyyy').format(ocorrencia.data_atividade!)
         : 'Data indisponível';
-        
-     final firstImage = ocorrencia.fotos_urls?.isNotEmpty == true ? ocorrencia.fotos_urls!.first : null;
 
-     showModalBottomSheet(
+    final firstImage = ocorrencia.fotos_urls?.isNotEmpty == true ? ocorrencia.fotos_urls!.first : null;
+
+    showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
         return DraggableScrollableSheet(
           expand: false,
-          initialChildSize: 0.4,
+          initialChildSize: 0.5,
           maxChildSize: 0.8,
           minChildSize: 0.2,
           builder: (BuildContext context, ScrollController scrollController) {
@@ -525,9 +464,9 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
                       child: firstImage != null
                           ? SmartImage(imageSource: firstImage, fit: BoxFit.cover)
                           : Container(
-                              color: Colors.grey[200],
-                              child: const Center(child: Icon(Icons.image_not_supported, size: 50, color: Colors.grey)),
-                            ),
+                        color: Colors.grey[200],
+                        child: const Center(child: Icon(Icons.image_not_supported, size: 50, color: Colors.grey)),
+                      ),
                     ),
                   ),
                   Padding(
@@ -545,9 +484,14 @@ class _MapaDenunciasScreenState extends State<MapaDenunciasScreen> {
                           style: const TextStyle(color: Colors.grey, fontSize: 13),
                         ),
                         const Divider(height: 32),
+
+                        // MOSTRA O NOME DA LOCALIDADE
+                        if (ocorrencia.nome_localidade != null && ocorrencia.nome_localidade!.isNotEmpty)
+                          _buildInfoRow(context, Icons.place, 'Localidade', ocorrencia.nome_localidade!),
+
                         _buildInfoRow(context, Icons.location_on_outlined, 'Endereço', ocorrencia.endereco ?? 'Não informado'),
                         if (ocorrencia.numero != null)
-                           _buildInfoRow(context, Icons.home, 'Número', ocorrencia.numero!),
+                          _buildInfoRow(context, Icons.home, 'Número', ocorrencia.numero!),
                       ],
                     ),
                   ),

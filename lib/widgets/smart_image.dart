@@ -1,9 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:http/http.dart' as http; 
 
 /// Um widget de imagem inteligente que decide se deve carregar uma imagem da rede, de um arquivo local ou de um asset.
-/// Agora suporta cache offline (lê de local se existir).
+/// Agora suporta cache offline REAL (baixa e salva no disco) com suporte a versionamento (query params).
 class SmartImage extends StatefulWidget {
   final String imageSource;
   final BoxFit? fit;
@@ -25,7 +26,7 @@ class SmartImage extends StatefulWidget {
 class _SmartImageState extends State<SmartImage> {
   File? _cachedFile;
   bool _isLoadingCache = true;
-  String? _debugError; // Variável para armazenar erro de debug
+  String? _debugError;
 
   @override
   void initState() {
@@ -42,7 +43,6 @@ class _SmartImageState extends State<SmartImage> {
   }
 
   Future<void> _checkCache() async {
-    // 0. Se for asset, não faz nada de cache
     if (widget.imageSource.startsWith('assets/')) {
       if (mounted) {
         setState(() {
@@ -54,9 +54,7 @@ class _SmartImageState extends State<SmartImage> {
       return;
     }
 
-    // 1. Se for arquivo local
     if (!widget.imageSource.startsWith('http')) {
-      // Verifica se o arquivo local existe para debug
       final file = File(widget.imageSource);
       if (!await file.exists()) {
         if (mounted) setState(() => _debugError = "Arquivo não encontrado: ${widget.imageSource}");
@@ -73,13 +71,21 @@ class _SmartImageState extends State<SmartImage> {
       return;
     }
 
-    // 2. Se for URL (http), tenta buscar no cache
     try {
       final docDir = await getApplicationDocumentsDirectory();
       final cacheDir = Directory('${docDir.path}/images_cache');
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
       
+      // GERA UM NOME ÚNICO BASEADO NA URL COMPLETA (incluindo query params como ?t=123)
+      // Isso garante que se a URL mudar, o arquivo de cache muda.
+      final urlHash = widget.imageSource.hashCode;
       final uri = Uri.parse(widget.imageSource);
-      final filename = uri.pathSegments.last; 
+      final extension = uri.pathSegments.last.split('.').last; // Tenta pegar extensão
+      // Nome ex: 34829102_nomeoriginal.jpg
+      final filename = '${urlHash}_${uri.pathSegments.last}'; 
+      
       final file = File('${cacheDir.path}/$filename');
 
       if (await file.exists()) {
@@ -91,9 +97,11 @@ class _SmartImageState extends State<SmartImage> {
           });
         }
         return;
+      } else {
+        _downloadAndCache(widget.imageSource, file);
       }
     } catch (e) {
-      // Ignora erro de cache
+       // Ignora erro
     }
 
     if (mounted) {
@@ -103,10 +111,21 @@ class _SmartImageState extends State<SmartImage> {
       });
     }
   }
+  
+  Future<void> _downloadAndCache(String url, File targetFile) async {
+     try {
+       final response = await http.get(Uri.parse(url));
+       if (response.statusCode == 200) {
+          await targetFile.writeAsBytes(response.bodyBytes);
+          // Opcional: Atualizar UI se quiser instantâneo, mas o Image.network cuida do primeiro load
+       }
+     } catch (e) {
+       // Falha silenciosa
+     }
+  }
 
   @override
   Widget build(BuildContext context) {
-    // 1. Se for Asset
     if (widget.imageSource.startsWith('assets/')) {
       return Image.asset(
         widget.imageSource,
@@ -117,17 +136,14 @@ class _SmartImageState extends State<SmartImage> {
       );
     }
 
-    // 2. Se for arquivo local direto (caminho string e não começa com http)
     if (!widget.imageSource.startsWith('http')) {
        return _buildImageFile(File(widget.imageSource));
     }
     
-    // 3. Se achou no cache (para URLs)
     if (_cachedFile != null) {
       return _buildImageFile(_cachedFile!);
     }
 
-    // 4. Fallback para rede
     return Image.network(
       widget.imageSource,
       width: widget.width,
@@ -173,27 +189,10 @@ class _SmartImageState extends State<SmartImage> {
       color: Colors.grey[200],
       padding: const EdgeInsets.all(4),
       child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.broken_image,
-              size: 30.0,
-              color: Colors.grey[400],
-            ),
-            // EXIBE O ERRO NA TELA PARA DEBUG (apenas se houver espaço)
-            if (_debugError != null || error != null)
-              Flexible(
-                child: SingleChildScrollView(
-                  child: Text(
-                    _debugError ?? error.toString(),
-                    style: const TextStyle(fontSize: 10, color: Colors.red),
-                    textAlign: TextAlign.center,
-                    maxLines: 5,
-                  ),
-                ),
-              ),
-          ],
+        child: Icon(
+          Icons.person,
+          size: 40.0,
+          color: Colors.grey[400],
         ),
       ),
     );

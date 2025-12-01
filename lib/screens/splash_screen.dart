@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:hive/hive.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:vector_tracker_app/core/app_logger.dart';
+import 'package:vector_tracker_app/services/denuncia_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -22,22 +25,29 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   void _initializeSplash() {
+    // 0. PRÉ-CARREGAMENTO DE DADOS GERAIS (Fire and Forget)
+    // Tenta baixar municípios em background enquanto o logo aparece
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+       try {
+         Provider.of<DenunciaService>(context, listen: false).fetchMunicipios();
+       } catch (e) {
+         AppLogger.warning('Erro ao tentar pré-carregar municípios na Splash', e);
+       }
+    });
+
     // 1. OUVINTE DE AUTENTICAÇÃO (Prioridade Máxima)
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen(
       (data) {
-        // Log para ajudar a entender o que está acontecendo
         AppLogger.info('Splash Event: ${data.event}');
 
         if (_redirected) return;
 
         if (data.event == AuthChangeEvent.passwordRecovery) {
-          // BINGO! Link de senha detectado.
-          _cancelTimer(); // Para o relógio de 3 segundos
+          _cancelTimer();
           _goToScreen('/update_password');
         }
       },
       onError: (error) {
-        // Se o link estiver quebrado ou expirado, avisa o usuário
         AppLogger.error('Erro no link de autenticação', error);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -63,10 +73,42 @@ class _SplashScreenState extends State<SplashScreen> {
     
     final session = Supabase.instance.client.auth.currentSession;
 
-    // Se tiver sessão, vai pra Home. Se não, Login.
     if (session != null) {
-      _goToScreen('/agent_home');
+      // Temos uma sessão válida (pode ser cacheada)
+      final userId = session.user.id;
+      
+      try {
+        // Tenta verificar online (caminho ideal)
+        final maybeAgent = await Supabase.instance.client
+            .from('agentes')
+            .select('id')
+            .eq('user_id', userId)
+            .maybeSingle()
+            .timeout(const Duration(seconds: 5)); // Timeout para não travar muito se net ruim
+        
+        if (maybeAgent != null) {
+          _goToScreen('/agent_home');
+          // Salva flag localmente para a próxima vez offline (opcional, mas o cache do agente já serve)
+        } else {
+          _goToScreen('/community_home');
+        }
+      } catch (e) {
+        AppLogger.warning('Sem conexão ou erro ao verificar perfil online. Tentando modo offline...', e);
+        
+        // FALLBACK OFFLINE: Verifica se tem dados de agente salvos no cache
+        if (Hive.isBoxOpen('agente_cache') && Hive.box('agente_cache').isNotEmpty) {
+            // Se tem cache de agente, assumimos que é agente
+            AppLogger.info('Cache de agente encontrado. Entrando como Agente (Offline).');
+            _goToScreen('/agent_home');
+        } else {
+            // Se não tem cache de agente, mas tem sessão, assumimos Comunidade
+            // (ou é um agente que nunca logou e limpou cache, aí infelizmente vai pra comunidade, mas é o melhor chute)
+            AppLogger.info('Sem cache de agente. Entrando como Comunidade (Offline).');
+            _goToScreen('/community_home');
+        }
+      }
     } else {
+      // Sem sessão, vai para login
       _goToScreen('/login');
     }
   }
@@ -79,7 +121,7 @@ class _SplashScreenState extends State<SplashScreen> {
   void _goToScreen(String routeName) {
     if (_redirected || !mounted) return;
     _redirected = true;
-    _cancelTimer(); // Garante que o timer morra
+    _cancelTimer(); 
     Navigator.of(context).pushNamedAndRemoveUntil(routeName, (route) => false);
   }
 
@@ -97,7 +139,7 @@ class _SplashScreenState extends State<SplashScreen> {
       body: Center(
         child: SizedBox(
           width: MediaQuery.of(context).size.width * 0.6,
-          child: Image.asset('assets/logo_agora_vai.png'),
+          child: Image.asset('assets/logo_agora_vai.png'), // Mantive o asset original encontrado no arquivo
         ),
       ),
     );

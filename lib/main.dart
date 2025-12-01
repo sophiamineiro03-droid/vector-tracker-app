@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -31,8 +32,9 @@ import 'package:vector_tracker_app/screens/minhas_denuncias_screen.dart';
 import 'package:vector_tracker_app/screens/registro_ocorrencia_agente_screen.dart';
 import 'package:vector_tracker_app/screens/splash_screen.dart';
 import 'package:vector_tracker_app/screens/agent_signup_screen.dart';
+import 'package:vector_tracker_app/screens/community_signup_screen.dart';
+import 'package:vector_tracker_app/screens/community_edit_profile_screen.dart'; 
 
-// Chave global para navegação (permite navegar de qualquer lugar)
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
@@ -54,10 +56,12 @@ Future<void> main() async {
     await Hive.openBox('denuncias_cache');
     await Hive.openBox('pending_denuncias');
     await Hive.openBox('localidades_cache');
+    await Hive.openBox('municipios_cache'); 
     await Hive.openBox('ocorrencias_cache');
     await Hive.openBox('pending_ocorrencias');
-    // Passo 3: Abre a caixa de cache do agente
     await Hive.openBox('agente_cache');
+    await Hive.openBox('anonymous_history');
+    await Hive.openBox('pending_status_updates');
 
     AppLogger.info('✓ Hive inicializado');
 
@@ -91,15 +95,49 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   StreamSubscription<AuthState>? _authSubscription;
+  // CORREÇÃO: Tipagem compatível com versões antigas do connectivity_plus (< 5.0.0)
+  StreamSubscription<ConnectivityResult>? _connectivitySubscription;
 
   @override
   void initState() {
     super.initState();
     _setupAuthListener();
+    _setupAutoSync();
+  }
+
+  void _setupAutoSync() {
+    // CORREÇÃO: Ouve um único resultado, não uma lista
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((ConnectivityResult result) {
+      final hasInternet = result == ConnectivityResult.mobile || 
+                          result == ConnectivityResult.wifi ||
+                          result == ConnectivityResult.ethernet;
+      
+      if (hasInternet) {
+        AppLogger.info('📡 Conexão detectada! Iniciando sincronização automática em background...');
+        
+        Future.delayed(const Duration(seconds: 5), () {
+           _triggerAutoSync();
+        });
+      }
+    });
+  }
+
+  Future<void> _triggerAutoSync() async {
+    try {
+       final agentService = ServiceLocator.get<AgentOcorrenciaService>();
+       if (agentService.pendingSyncCount > 0) {
+          AppLogger.info("AutoSync: Enviando ${agentService.pendingSyncCount} ocorrências...");
+          await agentService.syncPendingOcorrencias();
+       } else {
+          AppLogger.info("AutoSync: Nada para enviar do agente.");
+       }
+       
+    } catch (e) {
+      AppLogger.warning('Erro na sincronização automática', e);
+    }
   }
 
   void _setupAuthListener() {
-    // Ouvinte GLOBAL de autenticação.
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       final event = data.event;
       AppLogger.info('🔐 Evento de Auth Detectado Globalmente: $event');
@@ -108,15 +146,12 @@ class _MyAppState extends State<MyApp> {
         AppLogger.info('>> RECUPERAÇÃO DE SENHA DETECTADA <<');
         _navigateToUpdatePassword();
       } else if (event == AuthChangeEvent.signedIn) {
-        // Às vezes, links mágicos disparam apenas signedIn.
-        // Vamos verificar se a URL inicial tinha type=recovery (isso é mais complexo sem deep link nativo, mas vamos tentar pelo evento)
         AppLogger.info('Usuário logado. Verificando se precisa de troca de senha...');
       }
     });
   }
 
   void _navigateToUpdatePassword() {
-    // Pequeno delay para garantir que o contexto esteja pronto se o app acabou de abrir
     Future.delayed(const Duration(milliseconds: 500), () {
       if (navigatorKey.currentState != null) {
         AppLogger.info('Navegando para /update_password agora!');
@@ -133,13 +168,14 @@ class _MyAppState extends State<MyApp> {
   @override
   void dispose() {
     _authSubscription?.cancel();
+    _connectivitySubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: navigatorKey, // Conecta a chave global ao MaterialApp
+      navigatorKey: navigatorKey, 
       title: 'Vector Tracker',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -160,10 +196,12 @@ class _MyAppState extends State<MyApp> {
         '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
         '/agent_signup': (context) => const AgentSignupScreen(),
+        '/signup_comunidade': (context) => const CommunitySignupScreen(), 
         '/community_home': (context) => const CommunityHomeScreen(),
+        '/community_profile_edit': (context) => const CommunityEditProfileScreen(),
         '/agent_home': (context) => const AgentHomeScreen(),
         '/agent_profile': (context) => const AgentProfileScreen(),
-        '/update_password': (context) => const UpdatePasswordScreen(), // A tela está aqui!
+        '/update_password': (context) => const UpdatePasswordScreen(),
         '/edit_agent_profile': (context) {
           final agente = ModalRoute.of(context)!.settings.arguments as Agente;
           return EditAgentProfileScreen(agente: agente);

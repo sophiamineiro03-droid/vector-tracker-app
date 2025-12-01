@@ -17,9 +17,6 @@ class AgenteRepository {
 
     final user = _supabase.auth.currentUser;
     if (user == null) {
-      // Tenta recuperar do cache mesmo se o currentUser do Supabase estiver null (pode acontecer offline)
-      // Mas cuidado: só faz sentido se tivermos certeza que era esse usuário.
-      // Por segurança, vamos verificar o cache.
       final cachedMap = _cacheBox.get('current_agent');
       if (cachedMap != null) {
          final map = Map<String, dynamic>.from(cachedMap);
@@ -39,7 +36,6 @@ class AgenteRepository {
 
       final agente = Agente.fromMap(response);
       
-      // Salva no Cache
       await _cacheBox.put('current_agent', agente.toMap());
       
       _cachedAgent = agente;
@@ -47,13 +43,11 @@ class AgenteRepository {
     } catch (e) {
       print('Erro ao buscar agente online: $e. Tentando cache...');
       
-      // Fallback para Cache
       final cachedMap = _cacheBox.get('current_agent');
       if (cachedMap != null) {
          final map = Map<String, dynamic>.from(cachedMap);
          final agenteCache = Agente.fromMap(map);
          
-         // Verifica se o agente do cache pertence ao usuário logado (se tiver internet parcial)
          if (user.id == agenteCache.userId) {
              _cachedAgent = agenteCache;
              return agenteCache;
@@ -71,6 +65,7 @@ class AgenteRepository {
     }
 
     try {
+      // Nome fixo no storage para economizar espaço (sobrescreve)
       final fileName = '${user.id}.${imageFile.path.split('.').last}';
 
       await _supabase.storage.from('profile_pictures').upload(
@@ -80,19 +75,21 @@ class AgenteRepository {
           );
 
       final publicUrl = _supabase.storage.from('profile_pictures').getPublicUrl(fileName);
+      
+      // Adiciona timestamp na URL para "quebrar" o cache do app e forçar download da nova imagem
+      final urlWithTimestamp = '$publicUrl?t=${DateTime.now().millisecondsSinceEpoch}';
 
-      await _supabase.from('agentes').update({'avatar_url': publicUrl}).eq('user_id', user.id);
+      await _supabase.from('agentes').update({'avatar_url': urlWithTimestamp}).eq('user_id', user.id);
 
-      // Atualiza cache se já estiver carregado
       if (_cachedAgent != null) {
-         final novoAgente = _cachedAgent!.copyWith(avatarUrl: publicUrl);
+         final novoAgente = _cachedAgent!.copyWith(avatarUrl: urlWithTimestamp);
          _cachedAgent = novoAgente;
          await _cacheBox.put('current_agent', novoAgente.toMap());
       } else {
          _cachedAgent = null; 
       }
 
-      return publicUrl;
+      return urlWithTimestamp;
     } catch (e) {
       rethrow;
     }
@@ -110,7 +107,7 @@ class AgenteRepository {
 
     await _supabase.from('agentes').update({'nome': newName}).eq('user_id', user.id);
 
-    _cachedAgent = null; // Força refresh
+    _cachedAgent = null; 
   }
 
   Future<void> sendPasswordResetEmail(String email) async {

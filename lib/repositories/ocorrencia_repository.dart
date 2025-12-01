@@ -17,10 +17,11 @@ class OcorrenciaRepository {
   Future<List<Ocorrencia>> fetchOcorrenciasByAgenteFromSupabase(
       String agenteId) async {
     try {
-      // LINHA CORRIGIDA:
+      // CORREÇÃO CRÍTICA: Removi o '!inner'.
+      // Agora ele traz a ocorrência mesmo se 'localidades' for nulo (manual).
       final response = await supabase
           .from('ocorrencias')
-          .select('*, localidades!inner(municipios!inner(nome))')
+          .select('*, localidades(municipios(nome))') // << MUDOU AQUI (Tiramos o !inner)
           .eq('agente_id', agenteId);
 
       final ocorrencias = (response as List)
@@ -29,7 +30,6 @@ class OcorrenciaRepository {
 
       await _cacheBox.clear();
       for (var oc in ocorrencias) {
-        // CORREÇÃO: Usar toLocalMap para salvar no cache local com todos os campos extras
         await _cacheBox.put(oc.id, oc.toLocalMap());
       }
       return ocorrencias;
@@ -62,6 +62,11 @@ class OcorrenciaRepository {
         .select()
         .single();
     return Ocorrencia.fromMap(response).copyWith(sincronizado: true);
+  }
+
+  // === NOVO MÉTODO ===
+  Future<void> saveToCache(Ocorrencia ocorrencia) async {
+    await _cacheBox.put(ocorrencia.id, ocorrencia.toLocalMap());
   }
 
   Future<void> saveToPendingBox(Ocorrencia ocorrencia) async {

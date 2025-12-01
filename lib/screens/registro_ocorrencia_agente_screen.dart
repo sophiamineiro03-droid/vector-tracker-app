@@ -19,6 +19,7 @@ import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 import 'package:vector_tracker_app/widgets/smart_image.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:vector_tracker_app/screens/image_viewer_screen.dart'; // Para o Zoom funcionar
 
 String formatEnumName(String name) {
   switch (name) {
@@ -74,6 +75,9 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
   bool _isSaving = false;
   bool _isGettingLocation = false;
   bool _waitingForGPS = false; // Controla se estamos esperando o usuário voltar do GPS
+  // Variáveis para controle da mensagem de localização
+  String? _locationMessage;
+  Color _locationMessageColor = Colors.black;
   String? _openPanelKey = 'atividade';
   final List<String> _localImagePaths = [];
   final List<XFile> _newlyAddedImages = [];
@@ -107,6 +111,7 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
   final _dataAtividadeController = TextEditingController();
   final _numeroPITController = TextEditingController();
   final _municipioController = TextEditingController();
+  final _nomeLocalidadeController = TextEditingController();
   final _codigoLocalidadeController = TextEditingController();
   final _categoriaLocalidadeController = TextEditingController();
   final _enderecoController = TextEditingController();
@@ -180,24 +185,35 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
   Future<void> _fetchDenunciaContexto(String denunciaId) async {
     setState(() => _isLoadingContexto = true);
     try {
-      final denunciaService = context.read<DenunciaService>();
-      // Substitua a linha com erro por estas:
-      final response = await Supabase.instance.client
-          .from('denuncias')
-          .select('*, municipios!cidade(nome)')
-          .eq('id', denunciaId)
-          .single();
-      final denuncia = Denuncia.fromMap(response);
+      final denunciaService = context.read<DenunciaService>();// 1. Tenta pegar da lista já carregada na memória (que vem do cache)
+      final cachedDenuncia = denunciaService.items.firstWhere(
+            (d) => d['id'] == denunciaId,
+        orElse: () => {},
+      );
 
-      if (denuncia != null && mounted) {
-        setState(() {
-          _denunciaContexto = denuncia;
-        });
+      if (cachedDenuncia.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _denunciaContexto = Denuncia.fromMap(cachedDenuncia);
+          });
+        }
+      } else {
+        // 2. Se não achar na memória, tenta buscar do banco (fallback online)
+        final response = await Supabase.instance.client
+            .from('denuncias')
+            .select('*, municipios!cidade(nome)')
+            .eq('id', denunciaId)
+            .single();
+
+        if (response != null && mounted) {
+          setState(() {
+            _denunciaContexto = Denuncia.fromMap(response);
+          });
+        }
       }
     } catch (e) {
-      if (kDebugMode) {
-        print("Erro ao buscar contexto da denúncia: $e");
-      }
+      // Silencioso ou log leve, pois se não carregar o contexto, o form ainda funciona
+      if (kDebugMode) print("Erro ao buscar contexto da denúncia: $e");
     } finally {
       if (mounted) {
         setState(() => _isLoadingContexto = false);
@@ -240,6 +256,9 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
     if (oco.localidade_id != null) {
       _selectedLocalidadeId = oco.localidade_id;
     }
+
+    // ATUALIZAÇÃO: Lê o nome da localidade do campo correto
+    _nomeLocalidadeController.text = oco.nome_localidade ?? '';
     _codigoLocalidadeController.text = oco.codigo_localidade ?? '';
     _categoriaLocalidadeController.text = oco.categoria_localidade ?? '';
 
@@ -248,27 +267,17 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
     _complementoController.text = oco.complemento ?? '';
     _nomeMoradorController.text = oco.nome_morador ?? '';
 
-    // 3. ATIVIDADES (COM PROTEÇÃO TOTAL)
+    // 3. ATIVIDADES
     _tiposAtividade.clear();
-
-    // Tenta pegar o que veio do banco
     if (oco.tipo_atividade != null) {
       _tiposAtividade.addAll(oco.tipo_atividade!);
     }
-
-    // --- PROTEÇÃO: Se o banco falhou na lista, mas tem dados, força a marcação ---
-
-    // Se tem pendência registrada, garante que é PESQUISA
     if (oco.pendencia_pesquisa != null) {
       _tiposAtividade.add(TipoAtividade.pesquisa);
     }
-
-    // Se tem número de PIT, garante que é ATENDIMENTO AO PIT
     if (oco.numero_pit != null && oco.numero_pit!.isNotEmpty) {
       _tiposAtividade.add(TipoAtividade.atendimentoPIT);
     }
-
-    // Se tem inseticida ou cargas, garante que é BORRIFAÇÃO
     if ((oco.inseticida != null && oco.inseticida!.isNotEmpty) || (oco.numero_cargas ?? 0) > 0) {
       _tiposAtividade.add(TipoAtividade.borrifacao);
     }
@@ -278,7 +287,7 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
     _numCargasController.text = oco.numero_cargas?.toString() ?? '0';
     _codigoEtiquetaController.text = oco.codigo_etiqueta ?? '';
 
-    // 5. DETALHES DO IMÓVEL
+    // 5. DETALHES
     _situacaoImovel = oco.situacao_imovel;
     _pendenciaPesquisa = oco.pendencia_pesquisa;
     _pendenciaBorrifacao = oco.pendencia_borrifacao;
@@ -287,27 +296,21 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
     _melhoriaHabitacional = oco.melhoria_habitacional;
     _numeroAnexo = oco.numero_anexo;
 
-    // 6. CAPTURA E VESTÍGIOS (Intra e Peri)
-
-    // Intradomicílio
+    // 6. CAPTURA
     _numBarbeirosIntraController.text = oco.barbeiros_intradomicilio?.toString() ?? '0';
     if (oco.vestigios_intradomicilio != null) {
       _restoreVestigios(oco.vestigios_intradomicilio!, _vestigiosIntra);
     }
-
-    // Se tem barbeiros > 0, marca Triatomíneo.
     if ((oco.barbeiros_intradomicilio ?? 0) > 0) {
       _capturaIntraStatus = CapturaStatus.triatomineo;
     } else {
       _capturaIntraStatus = CapturaStatus.nenhum;
     }
 
-    // Peridomicílio
     _numBarbeirosPeriController.text = oco.barbeiros_peridomicilio?.toString() ?? '0';
     if (oco.vestigios_peridomicilio != null) {
       _restoreVestigios(oco.vestigios_peridomicilio!, _vestigiosPeri);
     }
-
     if ((oco.barbeiros_peridomicilio ?? 0) > 0) {
       _capturaPeriStatus = CapturaStatus.triatomineo;
     } else {
@@ -330,19 +333,21 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
   }
   void _populateFromDenuncia(Denuncia den) {
     _tiposAtividade.clear();
-    // Garante que o tipo de atividade padrão seja 'pesquisa' ao atender uma denúncia
     _tiposAtividade.add(TipoAtividade.pesquisa);
 
     _dataAtividadeController.text =
         DateFormat('dd/MM/yyyy').format(DateTime.now());
-    _municipioController.text = den.municipioNome ?? den.cidade ?? '';
 
-    // Verifica se a localidade da denúncia existe na lista do agente antes de selecionar
-    if (den.localidade_id != null && _localidadesAgente.any((loc) => loc.id == den.localidade_id)) {
-      _selectedLocalidadeId = den.localidade_id;
-      // Dispara a mudança para preencher os campos de código/categoria, se necessário
-      _onLocalidadeChanged(den.localidade_id);
+    // CORREÇÃO: Usa o NOME do município.
+    if (den.municipioNome != null && den.municipioNome!.isNotEmpty) {
+      _municipioController.text = den.municipioNome!;
     }
+
+    // Limpa campos manuais
+    _selectedLocalidadeId = null;
+    _nomeLocalidadeController.clear();
+    _codigoLocalidadeController.clear();
+    _categoriaLocalidadeController.clear();
 
     _enderecoController.text = den.rua ?? '';
     _numeroController.text = den.numero ?? '';
@@ -350,7 +355,6 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
     _currentLat = den.latitude;
     _currentLng = den.longitude;
 
-    // --- AQUI ESTÁ A CORREÇÃO, DENTRO DO MÉTODO ---
     if (den.foto_url != null && den.foto_url!.isNotEmpty) {
       _localImagePaths.add(den.foto_url!);
     }
@@ -386,64 +390,47 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
   Future<void> _saveForm() async {
     if (_isViewMode) return;
 
-    // A validação do formulário é o gatilho.
     if (!_formKey.currentState!.validate()) {
-      // 1. Encontra a chave do primeiro campo que falhou na validação.
       final errorFieldKey = _findFirstErrorFieldKey();
       if (errorFieldKey != null) {
-        // 2. Encontra o painel ao qual o campo pertence.
         final panelKey = _findPanelForField(errorFieldKey);
-
-        // 3. Força a expansão do painel que contém o erro.
-        setState(() {
-          _openPanelKey = panelKey;
-        });
-
-        // 4. Aguarda a UI redesenhar e então rola a tela até o campo.
+        setState(() { _openPanelKey = panelKey; });
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final context = errorFieldKey.currentContext;
           if (context != null) {
-            Scrollable.ensureVisible(context,
-              duration: const Duration(milliseconds: 600),
-              curve: Curves.easeInOut,
-              alignment: 0.3, // Alinha o campo um pouco abaixo do topo da tela.
-            );
+            Scrollable.ensureVisible(context, duration: const Duration(milliseconds: 600), curve: Curves.easeInOut, alignment: 0.3);
           }
         });
       }
-
-      // Mostra a mensagem de erro.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Por favor, corrija os erros em vermelho.'),
-            backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, corrija os erros em vermelho.'), backgroundColor: Colors.red));
       return;
     }
 
-    // O restante do seu código para salvar os dados continua aqui, sem alterações.
     setState(() => _isSaving = true);
     final agentRepo = context.read<AgenteRepository>();
     final currentAgent = await agentRepo.getCurrentAgent();
     final agentOcorrenciaService = context.read<AgentOcorrenciaService>();
 
-    final dataAtividade =
-        DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ??
-            DateTime.now();
+    final dataAtividade = DateFormat('dd/MM/yyyy').tryParse(_dataAtividadeController.text) ?? DateTime.now();
 
+    // CRIAÇÃO DO OBJETO PARA SALVAR (Agora usando os campos corretos)
     final ocorrenciaToSave = Ocorrencia(
       id: widget.ocorrencia?.id ?? const Uuid().v4(),
       agente_id: currentAgent?.id,
       denuncia_id: widget.ocorrencia?.denuncia_id ?? widget.denunciaOrigem?.id,
-      localidade_id: _selectedLocalidadeId,
+      localidade_id: null, // NULO (Pois é manual)
       tipo_atividade: _tiposAtividade.toList(),
       data_atividade: dataAtividade,
       numero_pit: _numeroPITController.text,
+
+      nome_localidade: _nomeLocalidadeController.text, // << SALVA AQUI AGORA
       codigo_localidade: _codigoLocalidadeController.text,
       categoria_localidade: _categoriaLocalidadeController.text,
-      endereco: _enderecoController.text,
+
+      endereco: _enderecoController.text, // << ENDEREÇO LIMPO (Sem concatenação)
       numero: _numeroController.text,
       complemento: _complementoController.text,
+
       pendencia_pesquisa: _pendenciaPesquisa,
       pendencia_borrifacao: _pendenciaBorrifacao,
       nome_morador: _nomeMoradorController.text,
@@ -452,20 +439,10 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
       tipo_parede: _tipoParede,
       tipo_teto: _tipoTeto,
       melhoria_habitacional: _melhoriaHabitacional,
-      vestigios_intradomicilio: _vestigiosIntra['Nenhum']!
-          ? 'Nenhum'
-          : _vestigiosIntra.keys
-          .where((k) => k != 'Nenhum' && _vestigiosIntra[k]!)
-          .join(', '),
-      barbeiros_intradomicilio:
-      int.tryParse(_numBarbeirosIntraController.text) ?? 0,
-      vestigios_peridomicilio: _vestigiosPeri['Nenhum']!
-          ? 'Nenhum'
-          : _vestigiosPeri.keys
-          .where((k) => k != 'Nenhum' && _vestigiosPeri[k]!)
-          .join(', '),
-      barbeiros_peridomicilio:
-      int.tryParse(_numBarbeirosPeriController.text) ?? 0,
+      vestigios_intradomicilio: _vestigiosIntra['Nenhum']! ? 'Nenhum' : _vestigiosIntra.keys.where((k) => k != 'Nenhum' && _vestigiosIntra[k]!).join(', '),
+      barbeiros_intradomicilio: int.tryParse(_numBarbeirosIntraController.text) ?? 0,
+      vestigios_peridomicilio: _vestigiosPeri['Nenhum']! ? 'Nenhum' : _vestigiosPeri.keys.where((k) => k != 'Nenhum' && _vestigiosPeri[k]!).join(', '),
+      barbeiros_peridomicilio: int.tryParse(_numBarbeirosPeriController.text) ?? 0,
       inseticida: _inseticidaController.text,
       numero_cargas: int.tryParse(_numCargasController.text) ?? 0,
       codigo_etiqueta: _codigoEtiquetaController.text,
@@ -484,24 +461,16 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
 
       if (ocorrenciaToSave.denuncia_id != null) {
         final denunciaService = context.read<DenunciaService>();
-        await denunciaService.updateDenunciaStatus(
-          ocorrenciaToSave.denuncia_id!,
-          'atendida',
-        );
+        await denunciaService.updateDenunciaStatus(ocorrenciaToSave.denuncia_id!, 'atendida');
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                _isNew ? 'Ocorrência salva com sucesso!' : 'Alterações salvas!'),
-            backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_isNew ? 'Ocorrência salva com sucesso!' : 'Alterações salvas!'), backgroundColor: Colors.green));
         Navigator.of(context).pop(true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('Erro ao salvar: ${e.toString()}'),
-            backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar: ${e.toString()}'), backgroundColor: Colors.red));
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -513,7 +482,7 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
     if ((_municipioController.text.isEmpty)) return _municipioKey;
     if ((_dataAtividadeController.text.isEmpty)) return _dataAtividadeKey;
     if (_tiposAtividade.contains(TipoAtividade.atendimentoPIT) && _numeroPITController.text.isEmpty) return _numeroPITKey;
-    if (_selectedLocalidadeId == null) return _localidadeKey;
+
     if (_tipoParede == null) return _tipoParedeKey;
     if (_tipoTeto == null) return _tipoTetoKey;
     if (_tiposAtividade.contains(TipoAtividade.borrifacao) && _inseticidaController.text.isEmpty) return _inseticidaKey;
@@ -607,6 +576,7 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
                       ),
                       const SizedBox(height: 16),
                       _buildExpansionPanelList(context, titleStyle),
+                      const SizedBox(height: 80), // <--- ADICIONE ESTA LINHA PARA DAR ESPAÇO EXTRA
                     ],
                   ),
                 ),
@@ -629,12 +599,11 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
   // --- Substitua o método inteiro por esta versão atualizada ---
   Widget _buildDenunciaContextCard(Denuncia denuncia) {
     final theme = Theme.of(context);
-    String endereco =
-        '${denuncia.rua ?? ''}, ${denuncia.numero ?? ''} - ${denuncia.bairro ?? ''}';
+    String endereco = '${denuncia.rua ?? ''}, ${denuncia.numero ?? ''} - ${denuncia.bairro ?? ''}';
 
     return Card(
       elevation: 4,
-      color: Colors.blueGrey[50], // Cor de destaque adicionada
+      color: Colors.blueGrey[50],
       margin: const EdgeInsets.only(bottom: 16),
       child: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -642,30 +611,39 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Contexto da Denúncia', // Título mais claro
-              style: theme.textTheme.titleLarge
-                  ?.copyWith(fontWeight: FontWeight.bold, color: Colors.black87),
+              'Contexto da Denúncia',
+              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: Colors.black87),
             ),
             const SizedBox(height: 16),
             if (denuncia.foto_url != null && denuncia.foto_url!.isNotEmpty) ...[
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SmartImage(
-                  imageSource: denuncia.foto_url!,
-                  height: 200,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
+              GestureDetector( // Adicionado clique para zoom
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    // CORREÇÃO AQUI: Usando .single para funcionar com a nova galeria
+                    MaterialPageRoute(builder: (context) => ImageViewerScreen.single(imageUrl: denuncia.foto_url!)),
+                  );
+                },
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Hero( // Adicionado Hero para animação bonita
+                    tag: denuncia.foto_url!,
+                    child: SmartImage(
+                      imageSource: denuncia.foto_url!,
+                      height: 200,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 16),
             ],
-            _buildInfoRow(context, Icons.description, 'Descrição',
-                denuncia.descricao ?? 'Nenhuma descrição informada'),
+            _buildInfoRow(context, Icons.description, 'Descrição', denuncia.descricao ?? 'Nenhuma descrição informada'),
             const SizedBox(height: 8),
             _buildInfoRow(context, Icons.location_on, 'Endereço', endereco),
             const SizedBox(height: 8),
-            _buildInfoRow(context, Icons.home_work, 'Complemento',
-                denuncia.complemento ?? 'Não informado'),
+            _buildInfoRow(context, Icons.home_work, 'Complemento', denuncia.complemento ?? 'Não informado'),
           ],
         ),
       ),
@@ -819,13 +797,6 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
   }
 
   Widget _buildAddressSection({required bool isViewOnly}) {
-    // --- INÍCIO DA CORREÇÃO ---
-    // Garante que o valor selecionado para o dropdown seja válido ou nulo.
-    final isSelectedLocalidadeValid = _selectedLocalidadeId != null &&
-        _localidadesAgente.any((loc) => loc.id == _selectedLocalidadeId);
-    final dropdownValue = isSelectedLocalidadeValid ? _selectedLocalidadeId : null;
-    // --- FIM DA CORREÇÃO ---
-
     return _FormSection(
       children: [
         if (!isViewOnly) ...[
@@ -836,54 +807,60 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(Icons.my_location),
-            label: const Text('Usar Minha Localização'),
+            label: const Text('Obter Localização'), // Mudado o texto
             onPressed:
             _isGettingLocation ? null : _getCurrentLocationAndFillAddress,
           ),
+
+          // AVISO DE LOCALIZAÇÃO NOVO
+          if (_locationMessage != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: _locationMessageColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _locationMessageColor.withOpacity(0.5)),
+              ),
+              child: Text(
+                _locationMessage!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: _locationMessageColor, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
         ],
-        Wrap(
-          spacing: 16,
-          runSpacing: 16,
-          children: [
-            DropdownButtonFormField<String>(
-              value: dropdownValue, // <-- VALOR CORRIGIDO
 
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Localidade*',
-                border: OutlineInputBorder(),
-              ),
-              hint: const Text('Selecione uma localidade'),
-              items: _localidadesAgente.map((localidade) {
-                return DropdownMenuItem(
-                  value: localidade.id,
-                  child: Text(localidade.nome),
-                );
-              }).toList(),
-              onChanged: isViewOnly ? null : _onLocalidadeChanged,
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Campo obrigatório';
-                }
-                return null;
-              },
-            ),
-            TextFormField(
-                controller: _codigoLocalidadeController,
-                readOnly: isViewOnly,
-                decoration: const InputDecoration(
-                    labelText: 'Código da Localidade',
-                    border: OutlineInputBorder())),
-            TextFormField(
-                controller: _categoriaLocalidadeController,
-                readOnly: isViewOnly,
-                decoration: const InputDecoration(
-                    labelText: 'Categoria',
-                    border: OutlineInputBorder())),
-          ],
-        ),
+        // Nome da Localidade
+        TextFormField(
+            controller: _nomeLocalidadeController,
+            readOnly: isViewOnly,
+            decoration: const InputDecoration(
+                labelText: 'Nome da Localidade',
+                border: OutlineInputBorder())),
         const SizedBox(height: 16),
+
+        // Código da Localidade
+        TextFormField(
+            controller: _codigoLocalidadeController,
+            readOnly: isViewOnly,
+            decoration: const InputDecoration(
+                labelText: 'Código da Localidade',
+                border: OutlineInputBorder())),
+        const SizedBox(height: 16),
+
+        // Categoria
+        TextFormField(
+            controller: _categoriaLocalidadeController,
+            readOnly: isViewOnly,
+            decoration: const InputDecoration(
+                labelText: 'Categoria',
+                border: OutlineInputBorder())),
+        const SizedBox(height: 16),
+
+        // Endereço
         TextFormField(
             controller: _enderecoController,
             readOnly: isViewOnly,
@@ -891,6 +868,8 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
                 labelText: 'Endereço (Rua, Avenida, etc)',
                 border: OutlineInputBorder())),
         const SizedBox(height: 16),
+
+        // Número e Complemento
         Row(
           children: [
             Expanded(
@@ -1109,92 +1088,120 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
     );
   }
 
-  Widget _buildImageSection({required bool isViewOnly}) {
-    final allImages = [
-      ..._localImagePaths,
-      ..._newlyAddedImages.map((f) => f.path)
-    ];
-    final canAddMore = allImages.length < 4;
+  Widget _buildImageSection({required bool isViewOnly}) {    final allImages = [
+    ..._localImagePaths,
+    ..._newlyAddedImages.map((f) => f.path)
+  ];
+  final canAddMore = allImages.length < 4;
 
-    return _FormSection(
-      children: [
-        if (allImages.isEmpty)
-          const Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 24.0),
-                child: Text('Nenhuma foto adicionada.'),
-              )),
-        if (allImages.isNotEmpty)
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: allImages.length,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemBuilder: (context, index) {
-              final imagePath = allImages[index];
-              return Stack(
-                fit: StackFit.expand,
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: SmartImage(imageSource: imagePath, fit: BoxFit.cover),
+  return _FormSection(
+    children: [
+      if (allImages.isEmpty && isViewOnly)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 24.0),
+          child: Text('Nenhuma foto registrada.'),
+        ),
+
+      // LISTA HORIZONTAL (CARROSSEL)
+      SizedBox(
+        height: 160,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: allImages.length + (isViewOnly || !canAddMore ? 0 : 1),
+          itemBuilder: (context, index) {
+
+            // BOTÃO DE ADICIONAR
+            if (index == allImages.length && !isViewOnly) {
+              return Container(
+                width: 120,
+                margin: const EdgeInsets.only(right: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey[400]!, width: 2), // Borda sólida
+                ),
+                child: InkWell(
+                  onTap: _showImageSourceDialog,
+                  borderRadius: BorderRadius.circular(12),
+                  child: const Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_a_photo, size: 32, color: Colors.grey),
+                      SizedBox(height: 8),
+                      Text('Adicionar', style: TextStyle(color: Colors.grey)),
+                    ],
                   ),
-                  if (!isViewOnly)
-                    Positioned(
-                      top: -4,
-                      right: -4,
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
+                ),
+              );
+            }
+
+            // FOTO DA LISTA
+            final imagePath = allImages[index];
+            return Stack(
+              children: [
+                Container(
+                  width: 140,
+                  margin: const EdgeInsets.only(right: 12),
+                  child: GestureDetector(
+                    onTap: () {
+                      // === MUDANÇA AQUI: MANDA A LISTA TODA PRA GALERIA ===
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ImageViewerScreen(
+                            imageUrls: allImages, // Manda todas as fotos
+                            initialIndex: index,  // Abre na que clicou
+                          ),
                         ),
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                          icon: const Icon(Icons.close,
-                              color: Colors.white, size: 18),
-                          onPressed: () {
-                            setState(() {
-                              if (_newlyAddedImages
-                                  .any((x) => x.path == imagePath)) {
-                                _newlyAddedImages
-                                    .removeWhere((x) => x.path == imagePath);
-                              } else {
-                                _localImagePaths.remove(imagePath);
-                              }
-                            });
-                          },
-                        ),
+                      );
+                    },
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Hero(
+                        tag: imagePath,
+                        child: SmartImage(imageSource: imagePath, fit: BoxFit.cover, height: 160, width: 140),
                       ),
                     ),
-                ],
-              );
-            },
-          ),
-        if (!isViewOnly) ...[
-          const SizedBox(height: 16),
-          Center(
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.add_a_photo),
-              label: const Text('Adicionar Foto'),
-              onPressed: canAddMore ? _showImageSourceDialog : null,
-            ),
-          ),
-          if (!canAddMore)
-            const Padding(
-              padding: EdgeInsets.only(top: 8.0),
-              child: Center(
-                child: Text('Limite de 4 fotos atingido.',
-                    style: TextStyle(color: Colors.grey)),
-              ),
-            ),
-        ],
-      ],
-    );
+                  ),
+                ),
+
+                if (!isViewOnly)
+                  Positioned(
+                    top: 4,
+                    right: 16,
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          if (_newlyAddedImages.any((x) => x.path == imagePath)) {
+                            _newlyAddedImages.removeWhere((x) => x.path == imagePath);
+                          } else {
+                            _localImagePaths.remove(imagePath);
+                          }
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close, color: Colors.white, size: 16),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+
+      if (!isViewOnly && canAddMore)
+        Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: Text('${allImages.length}/4 fotos', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        ),
+    ],
+  );
   }
 
   Widget _buildSprayingSection({required bool isViewOnly}) {
@@ -1329,18 +1336,13 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
 
     if (!serviceEnabled) {
       if (!mounted) return;
-
-      // Mostra o diálogo e espera a decisão do usuário
       await showDialog(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('GPS Desativado'),
-          content: const Text('A localização é necessária para registrar este imóvel. Por favor, ative o GPS.'),
+          content: const Text('A localização é necessária. Por favor, ative o GPS.'),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
             ElevatedButton(
               onPressed: () {
                 Geolocator.openLocationSettings();
@@ -1351,23 +1353,16 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
           ],
         ),
       );
-
-      // --- MELHORIA AQUI ---
-      // Ao fechar o diálogo (seja cancelando ou voltando das configurações),
-      // verificamos de novo. Se ligou, prossegue automaticamente!
       serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('GPS ainda desligado. Não foi possível obter a localização.')),
-          );
-        }
-        return;
-      }
+      if (!serviceEnabled) return;
     }
 
-    // Se chegou aqui, o GPS está ligado (ou já estava, ou o usuário ligou agora)
-    setState(() => _isGettingLocation = true);
+    setState(() {
+      _isGettingLocation = true;
+      _locationMessage = 'Obtendo GPS...';
+      _locationMessageColor = Colors.grey;
+    });
+
     try {
       final position = await LocationUtil.getCurrentPosition();
       if (position != null) {
@@ -1376,36 +1371,40 @@ class _RegistroOcorrenciaAgenteScreenState extends State<RegistroOcorrenciaAgent
           _currentLng = position.longitude;
         });
 
-        final placemarks = await placemarkFromCoordinates(
-          position.latitude,
-          position.longitude,
-        );
+        List<Placemark> placemarks = [];
+        try {
+          placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+        } catch (e) {
+          // Ignora erro de geocoding (offline)
+        }
 
         if (placemarks.isNotEmpty) {
           final p = placemarks.first;
           setState(() {
             _enderecoController.text = p.street ?? _enderecoController.text;
             _numeroController.text = p.subThoroughfare ?? _numeroController.text;
-            _municipioController.text = p.subAdministrativeArea ?? _municipioController.text;
-          });
-        }
+            // REMOVIDA a atualização do município para não sobrescrever o fixo
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Localização obtida com sucesso!'), backgroundColor: Colors.green));
+            _locationMessage = 'Localização e Endereço atualizados! Por favor, confira o número.';
+            _locationMessageColor = Colors.green;
+          });
+        } else {
+          setState(() {
+            // Mensagem amigável OFFLINE
+            _locationMessage = 'Coordenadas GPS capturadas! Não foi possível carregar os dados do endereço sem internet. Por favor, preencha.';
+            _locationMessageColor = Colors.orange.shade800;
+          });
         }
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao obter localização: $e'), backgroundColor: Colors.red),
-        );
-      }
+      setState(() {
+        _locationMessage = 'Erro ao obter GPS: $e';
+        _locationMessageColor = Colors.red;
+      });
     } finally {
       if (mounted) setState(() => _isGettingLocation = false);
     }
   }
-
 
   void _handleVestigiosChange(
       Map<String, bool> vestigios, String key, bool value) {

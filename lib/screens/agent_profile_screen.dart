@@ -1,4 +1,3 @@
-
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:vector_tracker_app/models/agente.dart';
 import 'package:vector_tracker_app/repositories/agente_repository.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
+import 'package:vector_tracker_app/widgets/smart_image.dart';
 
 class AgentProfileScreen extends StatefulWidget {
   const AgentProfileScreen({super.key});
@@ -42,7 +42,6 @@ class _AgentProfileScreenState extends State<AgentProfileScreen> {
       await repository.uploadAvatar(imageFile);
 
       setState(() {
-        // Força a recarga para exibir a nova imagem e limpar o cache da NetworkImage
         _agentFuture = repository.getCurrentAgent(forceRefresh: true);
       });
 
@@ -85,10 +84,7 @@ class _AgentProfileScreenState extends State<AgentProfileScreen> {
 
   Widget _buildProfilePicture(BuildContext context, Agente agente) {
     final colorScheme = Theme.of(context).colorScheme;
-    ImageProvider? backgroundImage;
-    if (agente.avatarUrl != null && agente.avatarUrl!.isNotEmpty) {
-      backgroundImage = NetworkImage('${agente.avatarUrl!}?t=${DateTime.now().millisecondsSinceEpoch}');
-    }
+    final hasImage = agente.avatarUrl != null && agente.avatarUrl!.isNotEmpty;
 
     return Container(
       width: 130,
@@ -96,15 +92,37 @@ class _AgentProfileScreenState extends State<AgentProfileScreen> {
       decoration: BoxDecoration(
         color: colorScheme.surfaceVariant,
         borderRadius: BorderRadius.circular(12.0),
-        image: backgroundImage != null ? DecorationImage(image: backgroundImage, fit: BoxFit.cover) : null,
       ),
       child: Stack(
         alignment: Alignment.center,
         children: [
-          if (backgroundImage == null && !_isUploading)
+          // CAMADA DA IMAGEM
+          if (hasImage)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12.0),
+              child: SmartImage(
+                imageSource: agente.avatarUrl!,
+                width: 130,
+                height: 130,
+                fit: BoxFit.cover,
+              ),
+            ),
+
+          // CAMADA DE ÍCONE (SE NÃO TIVER IMAGEM)
+          if (!hasImage && !_isUploading)
             Icon(Icons.person_outline, size: 90, color: colorScheme.onSurfaceVariant),
+
+          // CAMADA DE LOADING
           if (_isUploading)
-            const CircularProgressIndicator(),
+            Container(
+              width: 130, 
+              height: 130,
+              decoration: BoxDecoration(
+                 color: Colors.black26, 
+                 borderRadius: BorderRadius.circular(12.0)
+              ),
+              child: const Center(child: CircularProgressIndicator(color: Colors.white)),
+            ),
         ],
       ),
     );
@@ -112,7 +130,6 @@ class _AgentProfileScreenState extends State<AgentProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -145,7 +162,7 @@ class _AgentProfileScreenState extends State<AgentProfileScreen> {
           }
 
           final agente = snapshot.data!;
-          final areaAtuacao = agente.localidades.map((loc) => loc.nome).join(', ');
+          final areaAtuacao = agente.municipioNome ?? 'Município não informado';
 
           return RefreshIndicator(
             onRefresh: () async {
@@ -162,7 +179,7 @@ class _AgentProfileScreenState extends State<AgentProfileScreen> {
                   const SizedBox(height: 16),
                   Text(agente.nome, style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold), textAlign: TextAlign.center),
                   const SizedBox(height: 8),
-                  Text('Área de atuação: $areaAtuacao', style: textTheme.bodyLarge, textAlign: TextAlign.center),
+                  Text('Município: $areaAtuacao', style: textTheme.bodyLarge, textAlign: TextAlign.center),
                   const SizedBox(height: 32),
 
                   Card(
@@ -192,11 +209,19 @@ class _AgentProfileScreenState extends State<AgentProfileScreen> {
                   Text('ID: ${agente.userId}', style: textTheme.bodySmall?.copyWith(color: Colors.grey.shade500)),
                   const SizedBox(height: 24),
 
-                  SizedBox(
+                  Container(
                     width: double.infinity,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF39A2AE), Color(0xFF2979FF)],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
+                      borderRadius: BorderRadius.circular(15.0),
+                    ),
                     child: ElevatedButton.icon(
-                      icon: const Icon(Icons.exit_to_app),
-                      label: const Text('Sair do App'),
+                      icon: const Icon(Icons.logout, color: Colors.white), // Mudei para logout
+                      label: const Text('Sair da Conta', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       onPressed: () async {
                         await GetIt.I.get<AgenteRepository>().clearAgentOnLogout();
                         if (mounted) {
@@ -204,8 +229,8 @@ class _AgentProfileScreenState extends State<AgentProfileScreen> {
                         }
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: colorScheme.error,
-                        foregroundColor: colorScheme.onError,
+                        backgroundColor: Colors.transparent, 
+                        shadowColor: Colors.transparent,
                         padding: const EdgeInsets.symmetric(vertical: 16.0),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15.0)),
                       ),

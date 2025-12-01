@@ -10,4 +10,11 @@ class Municipio {
       nome: map['nome'] as String,
     );
   }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'nome': nome,
+    };
+  }
 }

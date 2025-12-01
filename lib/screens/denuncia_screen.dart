@@ -4,18 +4,25 @@ import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; 
 import 'package:uuid/uuid.dart';
 import 'package:vector_tracker_app/models/denuncia.dart';
-import 'package:vector_tracker_app/models/localidade.dart';
 import 'package:vector_tracker_app/models/municipio.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
 import 'package:vector_tracker_app/util/location_util.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
 import 'package:vector_tracker_app/widgets/smart_image.dart';
+import 'package:vector_tracker_app/core/app_logger.dart';
 
 class DenunciaScreen extends StatefulWidget {
   final Denuncia? denuncia;
-  const DenunciaScreen({super.key, this.denuncia});
+  final bool isViewOnly;
+
+  const DenunciaScreen({
+    super.key, 
+    this.denuncia,
+    this.isViewOnly = false,
+  });
 
   @override
   State<DenunciaScreen> createState() => _DenunciaScreenState();
@@ -25,10 +32,12 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
   final _formKey = GlobalKey<FormState>();
   XFile? _pickedImage;
   bool _isSaving = false;
-  bool _addressFilled = false;
+  
+  // Variáveis para controle da mensagem de localização
+  String? _locationMessage;
+  Color _locationMessageColor = Colors.black;
 
   String? _selectedCidadeId;
-  String? _selectedLocalidadeId;
 
   final _descricaoController = TextEditingController();
   final _ruaController = TextEditingController();
@@ -55,20 +64,20 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     _ruaController.text = denuncia.rua ?? '';
     _bairroController.text = denuncia.bairro ?? '';
     _selectedCidadeId = denuncia.cidade;
-    _selectedLocalidadeId = denuncia.localidade_id;
     _numeroController.text = denuncia.numero ?? '';
     _complementoController.text = denuncia.complemento ?? '';
     _latitude = denuncia.latitude;
     _longitude = denuncia.longitude;
+    
     if ((denuncia.rua ?? '').isNotEmpty) {
-      _addressFilled = true;
-    }
-    if (_selectedCidadeId != null) {
-      context.read<DenunciaService>().fetchLocalidades(_selectedCidadeId!);
+      _locationMessage = 'Endereço carregado da denúncia salva.';
+      _locationMessageColor = Colors.blue;
     }
   }
 
   Future<void> _pickImage() async {
+    if (widget.isViewOnly) return; // Bloqueia se for apenas leitura
+
     final source = await showModalBottomSheet<ImageSource>(
         context: context, builder: (context) => const ImageSourceSheet());
     if (source == null) return;
@@ -84,13 +93,34 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     }
   }
 
+  String _normalize(String text) {
+    return text.toLowerCase()
+        .replaceAll(RegExp(r'[áàãâä]'), 'a')
+        .replaceAll(RegExp(r'[éèêë]'), 'e')
+        .replaceAll(RegExp(r'[íìîï]'), 'i')
+        .replaceAll(RegExp(r'[óòõôö]'), 'o')
+        .replaceAll(RegExp(r'[úùûü]'), 'u')
+        .replaceAll(RegExp(r'[ç]'), 'c');
+  }
+
   Future<void> _getCurrentLocation() async {
-    setState(() => _isSaving = true);
+    if (widget.isViewOnly) return;
+
+    setState(() {
+      _isSaving = true;
+      _locationMessage = 'Obtendo GPS...';
+      _locationMessageColor = Colors.grey;
+    });
+    
     try {
       final position = await LocationUtil.getCurrentPosition();
 
       if (position == null) {
         if (mounted) {
+          setState(() {
+             _locationMessage = null; // Limpa msg de carregando
+             _isSaving = false;
+          });
           await showDialog(
             context: context,
             builder: (context) => AlertDialog(
@@ -109,35 +139,73 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
         return;
       }
 
-      final placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      // Tenta obter endereço (Geocoding) - Pode falhar se offline
+      List<Placemark> placemarks = [];
+      try {
+          placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      } catch (e) {
+          AppLogger.warning('Erro ao buscar endereço (Geocoding), provavelmente offline.', e);
+      }
 
       if (placemarks.isNotEmpty) {
         final p = placemarks[0];
+        
+        String? detectedCity = p.subAdministrativeArea ?? p.locality;
+        String? foundCidadeId;
+        String msgCidade = "";
+
+        if (detectedCity != null) {
+            final service = context.read<DenunciaService>();
+            try {
+                final municipioMatch = service.municipios.firstWhere(
+                  (m) => _normalize(m.nome) == _normalize(detectedCity),
+                );
+                foundCidadeId = municipioMatch.id;
+                msgCidade = "Município detectado: ${municipioMatch.nome}";
+            } catch (e) {
+                msgCidade = "Município atual ($detectedCity) não está cadastrado no sistema.";
+            }
+        }
+
         setState(() {
           _ruaController.text = p.street ?? '';
           _bairroController.text = p.subLocality ?? '';
           _latitude = position.latitude;
           _longitude = position.longitude;
-          _addressFilled = true;
-          _selectedCidadeId = null;
-          _selectedLocalidadeId = null;
-          context.read<DenunciaService>().clearLocalidades();
+          
+          if (foundCidadeId != null) {
+             _selectedCidadeId = foundCidadeId;
+          }
+          
+          // MENSAGEM ATUALIZADA COM LEMBRETE DO NÚMERO
+          _locationMessage = 'Localização e Endereço atualizados! Por favor, preencha o número da casa. $msgCidade';
+          _locationMessageColor = foundCidadeId != null ? Colors.green : Colors.orange;
         });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Endereço preenchido! Por favor, selecione a cidade e localidade na lista.'), backgroundColor: Colors.green),
-          );
-        }
+        
+      } else {
+          // CASO OFFLINE: Pegou GPS mas não conseguiu traduzir para Rua
+          setState(() {
+             _latitude = position.latitude;
+             _longitude = position.longitude;
+             
+             // MENSAGEM ATUALIZADA COM "Por favor, preencha."
+             _locationMessage = 'Coordenadas GPS capturadas! Não foi possível carregar os dados do endereço sem internet. Por favor, preencha.';
+             _locationMessageColor = Colors.orange.shade800;
+          });
       }
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
+      setState(() {
+         _locationMessage = 'Erro ao obter GPS: $e';
+         _locationMessageColor = Colors.red;
+      });
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
   Future<void> _submitForm() async {
+    if (widget.isViewOnly) return; // Bloqueia envio
+
     if (!_formKey.currentState!.validate()) return;
 
     if (_pickedImage == null && widget.denuncia?.foto_url == null) {
@@ -153,15 +221,19 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
       final denunciaService = context.read<DenunciaService>();
       final id = widget.denuncia?.id ?? const Uuid().v4();
 
+      final user = Supabase.instance.client.auth.currentUser;
+      AppLogger.info('DEBUG: Usuário Logado no Form: ${user?.email} (ID: ${user?.id})');
+
       final novaDenuncia = Denuncia(
         id: id,
+        userId: user?.id, 
         descricao: _descricaoController.text,
         latitude: _latitude,
         longitude: _longitude,
         rua: _ruaController.text,
         bairro: _bairroController.text,
         cidade: _selectedCidadeId,
-        localidade_id: _selectedLocalidadeId,
+        localidade_id: null,
         numero: _numeroController.text,
         complemento: _complementoController.text,
         foto_url: _pickedImage?.path,
@@ -173,7 +245,7 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Denúncia enviada com sucesso!'), backgroundColor: Colors.green),
+          const SnackBar(content: Text('Denúncia salva!'), backgroundColor: Colors.green),
         );
         Navigator.of(context).pop(true);
       }
@@ -188,51 +260,46 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
     }
   }
 
-  void _onMunicipioChanged(String? newCidadeId) {
-    if (newCidadeId == null) return;
-    setState(() {
-      _selectedCidadeId = newCidadeId;
-      _selectedLocalidadeId = null; // Limpa a seleção de localidade
-    });
-    context.read<DenunciaService>().fetchLocalidades(newCidadeId);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: const GradientAppBar(title: 'Registrar Denúncia'),
-      body: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              _buildImageCard(),
-              const SizedBox(height: 16),
-              _buildDescriptionCard(),
-              const SizedBox(height: 16),
-              _buildAddressCard(),
-            ],
+      appBar: GradientAppBar(title: widget.isViewOnly ? 'Detalhes da Denúncia' : 'Registrar Denúncia'),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                _buildImageCard(),
+                const SizedBox(height: 16),
+                _buildDescriptionCard(),
+                const SizedBox(height: 16),
+                _buildAddressCard(),
+                
+                // CORREÇÃO: Botão movido para dentro do scroll, no final
+                if (!widget.isViewOnly) ...[
+                  const SizedBox(height: 32),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                    onPressed: _isSaving ? null : _submitForm,
+                    child: _isSaving
+                        ? const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(Colors.white))
+                        : const Text('Enviar Denúncia', style: TextStyle(fontSize: 18)),
+                  ),
+                  const SizedBox(height: 24), // Respiro final
+                ],
+              ],
+            ),
           ),
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: ElevatedButton(
-            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-            onPressed: _isSaving ? null : _submitForm,
-            child: _isSaving
-                ? const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(Colors.white))
-                : const Text('Enviar Denúncia', style: TextStyle(fontSize: 18)),
-          ),
-        ),
-      ),
+      // bottomNavigationBar REMOVIDO
     );
   }
-
+  
   Widget _buildImageCard() {
     return Card(
       elevation: 2, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -250,15 +317,17 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
                   decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(10)),
                   child: _buildImageContent()),
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _pickImage,
-                icon: const Icon(Icons.camera_alt, size: 20),
-                label: const Text('Adicionar Foto'),
-              ),
-            )
+            if (!widget.isViewOnly) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _pickImage,
+                  icon: const Icon(Icons.camera_alt, size: 20),
+                  label: const Text('Adicionar Foto'),
+                ),
+              )
+            ],
           ],
         ),
       ),
@@ -283,14 +352,17 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Descrição (Opcional)', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+            Text('Descrição', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             TextFormField(
               controller: _descricaoController,
-              decoration: const InputDecoration(
-                  hintText: 'Ex: Encontrei um inseto parecido com um barbeiro na parede do meu quarto...',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(vertical: 10.0, horizontal: 10.0)),
+              readOnly: widget.isViewOnly,
+              decoration: InputDecoration(
+                  hintText: widget.isViewOnly ? '' : 'Ex: Encontrei um inseto parecido com um barbeiro na parede do meu quarto...',
+                  border: const OutlineInputBorder(),
+                  fillColor: widget.isViewOnly ? Colors.grey[100] : null,
+                  filled: widget.isViewOnly,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10.0, horizontal: 10.0)),
               maxLines: 4,
             ),
           ],
@@ -311,27 +383,40 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
           children: [
             Text('Endereço da Denúncia', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _isSaving ? null : _getCurrentLocation,
-                icon: const Icon(Icons.my_location),
-                label: const Text('Obter Localização e Endereço'),
-                style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+            
+            if (!widget.isViewOnly)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isSaving ? null : _getCurrentLocation,
+                  icon: const Icon(Icons.my_location),
+                  label: const Text('Obter Localização'),
+                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
+                ),
               ),
-            ),
-            if (_addressFilled) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12), width: double.infinity,
-                decoration: BoxDecoration(color: Colors.blue[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue[200]!)),
-                child: const Text('Endereço preenchido! Por favor, selecione a cidade e a localidade na lista.', textAlign: TextAlign.center, style: TextStyle(color: Colors.blue)),
-              ),
+            
+            if (_locationMessage != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12), 
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: _locationMessageColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8), 
+                    border: Border.all(color: _locationMessageColor.withOpacity(0.5))
+                  ),
+                  child: Text(
+                    _locationMessage!, 
+                    textAlign: TextAlign.center, 
+                    style: TextStyle(color: _locationMessageColor, fontWeight: FontWeight.bold)
+                  ),
+                ),
             ],
+
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               value: _selectedCidadeId,
-              decoration: const InputDecoration(labelText: 'Cidade*', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Cidade', border: OutlineInputBorder()),
               isExpanded: true,
               hint: denunciaService.isMunicipiosLoading ? const Text('Carregando cidades...') : const Text('Selecione a cidade'),
               items: denunciaService.municipios.map((Municipio municipio) {
@@ -340,43 +425,36 @@ class _DenunciaScreenState extends State<DenunciaScreen> {
                   child: Text(municipio.nome),
                 );
               }).toList(),
-              onChanged: _onMunicipioChanged,
-              validator: (value) => value == null ? 'Campo obrigatório' : null,
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              value: _selectedLocalidadeId,
-              decoration: const InputDecoration(labelText: 'Localidade*', border: OutlineInputBorder()),
-              isExpanded: true,
-              hint: denunciaService.isLocalidadesLoading ? const Text('Carregando...') : const Text('Selecione a localidade'),
-              items: denunciaService.localidades.map((Localidade localidade) {
-                return DropdownMenuItem<String>(
-                  value: localidade.id,
-                  child: Text(localidade.nome),
-                );
-              }).toList(),
-              onChanged: _selectedCidadeId == null ? null : (String? newValue) {
-                setState(() {
-                  _selectedLocalidadeId = newValue;
-                });
+              onChanged: widget.isViewOnly ? null : (newVal) {
+                 setState(() => _selectedCidadeId = newVal);
               },
-              validator: (value) => value == null ? 'Campo obrigatório' : null,
+              validator: (value) => value == null ? 'Cidade obrigatória (Use o GPS ou selecione)' : null,
             ),
             const SizedBox(height: 10),
             TextFormField(
               controller: _numeroController,
-              decoration: const InputDecoration(labelText: 'Número da Casa/Apto*', border: OutlineInputBorder()),
+              readOnly: widget.isViewOnly,
+              decoration: const InputDecoration(labelText: 'Número da Casa*', border: OutlineInputBorder()),
               validator: (value) => (value ?? '').isEmpty ? 'O número é obrigatório' : null,
             ),
             const SizedBox(height: 10),
             TextFormField(
               controller: _complementoController,
+              readOnly: widget.isViewOnly,
               decoration: const InputDecoration(labelText: 'Complemento (Opcional)', border: OutlineInputBorder()),
             ),
             const SizedBox(height: 10),
-            TextFormField(controller: _ruaController, decoration: const InputDecoration(labelText: 'Rua', border: OutlineInputBorder())),
+            TextFormField(
+              controller: _ruaController, 
+              readOnly: widget.isViewOnly,
+              decoration: const InputDecoration(labelText: 'Rua', border: OutlineInputBorder())
+            ),
             const SizedBox(height: 10),
-            TextFormField(controller: _bairroController, decoration: const InputDecoration(labelText: 'Bairro', border: OutlineInputBorder())),
+            TextFormField(
+              controller: _bairroController, 
+              readOnly: widget.isViewOnly,
+              decoration: const InputDecoration(labelText: 'Bairro (Opcional)', border: OutlineInputBorder())
+            ),
           ],
         ),
       ),

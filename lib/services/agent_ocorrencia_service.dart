@@ -10,6 +10,7 @@ import 'package:vector_tracker_app/models/ocorrencia.dart';
 import 'package:vector_tracker_app/repositories/agente_repository.dart';
 import 'package:vector_tracker_app/repositories/ocorrencia_repository.dart';
 import 'package:vector_tracker_app/services/denuncia_service.dart';
+import 'package:http/http.dart' as http; // Adicionado para download manual
 
 class AgentOcorrenciaService extends ChangeNotifier {
   final AgenteRepository _agenteRepository;
@@ -19,10 +20,8 @@ class AgentOcorrenciaService extends ChangeNotifier {
   AgentOcorrenciaService(this._agenteRepository, this._ocorrenciaRepository);
 
   List<Ocorrencia> _ocorrencias = [];
-  // Histórico de ocorrências (já sincronizadas ou salvas localmente para histórico)
   List<Ocorrencia> get ocorrencias => _ocorrencias;
 
-  // Lista separada apenas para itens pendentes de envio
   List<Ocorrencia> _pendingOcorrencias = [];
   List<Ocorrencia> get pendingOcorrencias => _pendingOcorrencias;
 
@@ -32,10 +31,8 @@ class AgentOcorrenciaService extends ChangeNotifier {
   bool _isSyncing = false;
   bool get isSyncing => _isSyncing;
 
-  // Conta apenas os itens que realmente estão na fila de sincronização
   int get pendingSyncCount => _pendingOcorrencias.length;
 
-  // Busca apenas os itens da caixa de pendentes
   Future<void> fetchPendingOcorrencias() async {
     try {
       _pendingOcorrencias = await _ocorrenciaRepository.getFromPendingBox();
@@ -47,37 +44,24 @@ class AgentOcorrenciaService extends ChangeNotifier {
     }
   }
 
-  // Método auxiliar para combinar cache + pendentes
   void _mergeOcorrencias(List<Ocorrencia> cachedOrServerList) {
     final Map<String, Ocorrencia> combinedMap = {};
-    
-    // 1. Adiciona a lista base (cache ou servidor)
     for (var o in cachedOrServerList) {
       combinedMap[o.id] = o;
     }
-    
-    // 2. Sobrepõe com pendentes (pendentes têm prioridade pois são edições locais ou novos registros)
     for (var p in _pendingOcorrencias) {
       combinedMap[p.id] = p;
     }
-    
     _ocorrencias = combinedMap.values.toList();
-    // A ordenação é feita na UI, mas poderíamos ordenar aqui se necessário
   }
 
   Future<void> fetchOcorrencias() async {
     _setLoading(true);
     try {
-      // Carrega histórico do cache
       final cached = await _ocorrenciaRepository.getOcorrenciasFromCache();
-      // Carrega pendentes
       await fetchPendingOcorrencias();
-      
-      // Combina para exibição
       _mergeOcorrencias(cached);
       notifyListeners();
-      
-      // Tenta buscar dados novos do servidor
       await forceRefresh();
     } catch (e) {
       AppLogger.error('Erro ao buscar ocorrências', e);
@@ -87,7 +71,6 @@ class AgentOcorrenciaService extends ChangeNotifier {
   }
 
   Future<void> forceRefresh() async {
-    // Não ativa loading global para não travar a UI se for apenas atualização de fundo
     try {
       final agente = await _agenteRepository.getCurrentAgent();
       if (agente == null) {
@@ -96,15 +79,56 @@ class AgentOcorrenciaService extends ChangeNotifier {
         return;
       }
       final serverList = await _ocorrenciaRepository.fetchOcorrenciasByAgenteFromSupabase(agente.id);
-      
-      // Garante que pendentes estejam atualizados
       await fetchPendingOcorrencias();
-      
-      // Combina server + pendentes
       _mergeOcorrencias(serverList);
       notifyListeners();
+      
+      // === Tenta reparar o cache de imagens em segundo plano ===
+      _repairMissingCacheImages();
+      
     } catch (e) {
       AppLogger.warning('Erro ao forçar atualização (possivelmente offline)', e);
+    }
+  }
+
+  // === ROTINA DE AUTOCORREÇÃO DE CACHE ===
+  Future<void> _repairMissingCacheImages() async {
+    try {
+      final docDir = await getApplicationDocumentsDirectory();
+      final cacheDir = Directory('${docDir.path}/images_cache');
+      if (!await cacheDir.exists()) {
+        await cacheDir.create(recursive: true);
+      }
+
+      // Percorre todas as ocorrências carregadas
+      for (var ocorrencia in _ocorrencias) {
+        if (ocorrencia.fotos_urls != null) {
+          for (var url in ocorrencia.fotos_urls!) {
+            // Se for URL válida
+            if (url.startsWith('http')) {
+              try {
+                final uri = Uri.parse(url);
+                final filename = uri.pathSegments.last;
+                final targetFile = File('${cacheDir.path}/$filename');
+
+                // Se NÃO existir no cache local, baixa agora!
+                if (!await targetFile.exists()) {
+                  AppLogger.info("Autocorreção: Baixando imagem faltante: $filename");
+                  final response = await http.get(uri);
+                  if (response.statusCode == 200) {
+                    await targetFile.writeAsBytes(response.bodyBytes);
+                    AppLogger.info("Autocorreção: Imagem recuperada!");
+                  }
+                }
+              } catch (e) {
+                // Ignora erros individuais
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      AppLogger.warning('Erro na rotina de reparo de imagens', e);
     }
   }
 
@@ -115,24 +139,15 @@ class AgentOcorrenciaService extends ChangeNotifier {
       if (agente == null) throw Exception('Agente não identificado.');
 
       var ocorrenciaToUpload = ocorrencia.copyWith(agente_id: agente.id);
-
-      // Prepara URLs de imagens
       List<String> finalImageUrls = List.from(ocorrencia.fotos_urls ?? []);
 
-      // Upload de imagens novas
       if (ocorrenciaToUpload.localImagePaths != null &&
           ocorrenciaToUpload.localImagePaths!.isNotEmpty) {
         for (String path in ocorrenciaToUpload.localImagePaths!) {
           String? publicUrl = await _uploadImage(path, ocorrenciaToUpload.id);
-          
-          // CORREÇÃO: Se falhar o upload, lança exceção para abortar o salvamento
-          // e manter o item na lista de pendentes (offline).
           if (publicUrl != null) {
             finalImageUrls.add(publicUrl);
-            
-            // CACHE MANUAL: Copia a imagem local para o diretório de cache do SmartImage
             await _cacheImageForOffline(path, publicUrl);
-
           } else {
              throw Exception("Falha crítica: Não foi possível fazer upload da imagem $path. Abortando sincronização.");
           }
@@ -141,27 +156,23 @@ class AgentOcorrenciaService extends ChangeNotifier {
 
       ocorrenciaToUpload = ocorrenciaToUpload.copyWith(
         fotos_urls: finalImageUrls,
-        localImagePaths: [], // Limpa os caminhos locais pois já subiram (e foram cacheados)
+        localImagePaths: [],
         sincronizado: true,
       );
 
       final data = ocorrenciaToUpload.toMap();
-      
-      // Tenta salvar no Supabase
       await _supabase.from('ocorrencias').upsert(data);
       AppLogger.info('Ocorrência ${ocorrenciaToUpload.id} salva (upsert) no Supabase!');
 
-      // SE SUCESSO: Remove da caixa de pendentes (caso estivesse lá)
+      await _ocorrenciaRepository.saveToCache(ocorrenciaToUpload);
       await _ocorrenciaRepository.deleteFromPendingBox(ocorrencia.id);
 
-      // Atualiza status da denúncia se houver
       if (ocorrenciaToUpload.denuncia_id != null &&
           ocorrenciaToUpload.denuncia_id!.isNotEmpty) {
         try {
           await _supabase
               .from('denuncias')
               .update({'status': 'atendida'}).eq('id', ocorrenciaToUpload.denuncia_id!);
-          
           final denunciaService = GetIt.I.get<DenunciaService>();
           await denunciaService.updateDenunciaStatus(ocorrenciaToUpload.denuncia_id!, 'atendida');
         } catch (e, s) {
@@ -169,10 +180,8 @@ class AgentOcorrenciaService extends ChangeNotifier {
         }
       }
       
-      // Atualiza listas em memória
       await fetchPendingOcorrencias();
       
-      // ATUALIZAÇÃO MANUAL DA LISTA LOCAL
       final index = _ocorrencias.indexWhere((o) => o.id == ocorrenciaToUpload.id);
       if (index != -1) {
         _ocorrencias[index] = ocorrenciaToUpload;
@@ -185,15 +194,11 @@ class AgentOcorrenciaService extends ChangeNotifier {
 
     } catch (e) {
       AppLogger.warning('Falha ao salvar online. Iniciando persistência local...', e);
-      
-      // SE FALHA: Persiste imagens e salva na caixa de pendentes
       final ocorrenciaSegura = await _persistLocalImages(ocorrencia);
-      
       final pendente = ocorrenciaSegura.copyWith(sincronizado: false);
       await _ocorrenciaRepository.saveToPendingBox(pendente);
       await fetchPendingOcorrencias();
       
-      // Atualiza lista local
       final index = _ocorrencias.indexWhere((o) => o.id == pendente.id);
       if (index != -1) {
         _ocorrencias[index] = pendente;
@@ -206,7 +211,6 @@ class AgentOcorrenciaService extends ChangeNotifier {
     }
   }
   
-  /// Copia imagens temporárias para uma pasta segura do app.
   Future<Ocorrencia> _persistLocalImages(Ocorrencia ocorrencia) async {
     if (ocorrencia.localImagePaths == null || ocorrencia.localImagePaths!.isEmpty) {
       return ocorrencia;
@@ -222,31 +226,21 @@ class AgentOcorrenciaService extends ChangeNotifier {
       List<String> newPaths = [];
       for (String path in ocorrencia.localImagePaths!) {
         final file = File(path);
-        AppLogger.info("Verificando imagem original: $path");
-        
-        // Verifica se arquivo existe
         if (await file.exists()) {
-          // Se já está no diretório offline, mantém
           if (path.startsWith(offlineDir.path)) {
             newPaths.add(path);
             continue;
           }
           
-          // Copia para lá
           final fileName = path.split(Platform.pathSeparator).last;
           final newPath = '${offlineDir.path}/$fileName';
           final targetFile = File(newPath);
           
           if (!await targetFile.exists()) {
              await file.copy(newPath);
-             AppLogger.info("Imagem copiada para: $newPath");
-          } else {
-             AppLogger.info("Imagem já existe no destino: $newPath");
-          }
+          } 
           newPaths.add(newPath);
         } else {
-          AppLogger.warning("Imagem original NÃO ENCONTRADA: $path");
-          // Mantém path original como fallback, mas provavelmente falhará
           newPaths.add(path);
         }
       }

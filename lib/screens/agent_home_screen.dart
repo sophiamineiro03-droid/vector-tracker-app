@@ -18,15 +18,17 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // Carrega o agente para obter as localidades e filtrar as denúncias corretamente
       final agenteRepository = Provider.of<AgenteRepository>(context, listen: false);
       final agente = await agenteRepository.getCurrentAgent();
       final localidadeIds = agente?.localidades.map((loc) => loc.id).toList();
+      final municipioId = agente?.municipioId;
 
       if (mounted) {
         Provider.of<AgentOcorrenciaService>(context, listen: false).fetchOcorrencias();
-        // Aplica o filtro de localidades também na tela inicial para que os números batam com a lista
-        Provider.of<DenunciaService>(context, listen: false).fetchItems(localidadeIds: localidadeIds);
+        Provider.of<DenunciaService>(context, listen: false).fetchItems(
+          localidadeIds: localidadeIds, 
+          municipioId: municipioId
+        );
       }
     });
   }
@@ -40,14 +42,16 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
       ),
       body: Consumer2<AgentOcorrenciaService, DenunciaService>(
         builder: (context, agentService, denunciaService, child) {
+          
+          // CORREÇÃO: Filtra também as RECUSADAS para não contar errado
           final pendenciasCount = denunciaService.items
-              .where((d) => (d['status'] as String?)?.toLowerCase() != 'atendida')
+              .where((d) {
+                 final status = (d['status'] as String?)?.toLowerCase();
+                 return status != 'atendida' && status != 'recusada';
+              })
               .length;
           
-          // Usa o getter específico para contagem de sincronização
           final sincronizarCount = agentService.pendingSyncCount;
-          
-          // Usa o tamanho da lista de histórico para "Meu Trabalho"
           final meuTrabalhoCount = agentService.ocorrencias.length;
 
           final isLoading = (agentService.isLoading && agentService.ocorrencias.isEmpty) ||
@@ -62,10 +66,14 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
               final agenteRepository = Provider.of<AgenteRepository>(context, listen: false);
               final agente = await agenteRepository.getCurrentAgent();
               final localidadeIds = agente?.localidades.map((loc) => loc.id).toList();
+              final municipioId = agente?.municipioId;
               
               if (context.mounted) {
                 await agentService.fetchOcorrencias();
-                await denunciaService.fetchItems(localidadeIds: localidadeIds);
+                await denunciaService.fetchItems(
+                  localidadeIds: localidadeIds,
+                  municipioId: municipioId
+                );
               }
             },
             child: Padding(
@@ -77,7 +85,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
                 children: [
                   DashboardCard(
                     icon: Icons.notification_important_outlined,
-                    title: 'Pendências da Localidade',
+                    title: 'Pendências do Município',
                     subtitle: '$pendenciasCount denúncias aguardando',
                     onTap: () =>
                         Navigator.pushNamed(context, '/pendencias_localidade'),

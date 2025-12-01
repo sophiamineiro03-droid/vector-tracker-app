@@ -3,12 +3,13 @@ import 'package:flutter/foundation.dart';
 @immutable
 class Denuncia {
   final String id;
+  final String? userId; // Adicionado
   final String? descricao;
   final double? latitude;
   final double? longitude;
   final String? rua;
   final String? bairro;
-  final String? cidade; // Continua sendo o ID do município, para salvar no banco.
+  final String? cidade; 
   final String? localidade_id;
   final String? estado;
   final String? numero;
@@ -17,13 +18,12 @@ class Denuncia {
   final DateTime? createdAt;
   final String? status;
 
-  // Campos NOVOS para exibição. Eles não existem na tabela 'denuncias',
-  // mas serão preenchidos pelo Supabase usando um JOIN.
   final String? municipioNome;
   final String? localidadeNome;
 
   const Denuncia({
     required this.id,
+    this.userId,
     this.descricao,
     this.latitude,
     this.longitude,
@@ -37,12 +37,13 @@ class Denuncia {
     this.foto_url,
     this.createdAt,
     this.status,
-    this.municipioNome, // Adicionado
-    this.localidadeNome, // Adicionado
+    this.municipioNome, 
+    this.localidadeNome, 
   });
 
   Denuncia copyWith({
     String? id,
+    String? userId,
     String? descricao,
     double? latitude,
     double? longitude,
@@ -61,6 +62,7 @@ class Denuncia {
   }) {
     return Denuncia(
       id: id ?? this.id,
+      userId: userId ?? this.userId,
       descricao: descricao ?? this.descricao,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
@@ -80,15 +82,15 @@ class Denuncia {
   }
 
   Map<String, dynamic> toMap() {
-    // Os campos de exibição (municipioNome) não são enviados ao salvar.
     return {
       'id': id,
+      'user_id': userId, // Mapeando para o banco
       'descricao': descricao,
       'latitude': latitude,
       'longitude': longitude,
       'rua': rua,
       'bairro': bairro,
-      'cidade': cidade, // Continua enviando o ID do município.
+      'cidade': cidade, 
       'localidade_id': localidade_id,
       'estado': estado,
       'numero': numero,
@@ -101,8 +103,6 @@ class Denuncia {
 
   factory Denuncia.fromMap(Map<String, dynamic> map) {
     
-    // Função auxiliar para extrair o nome de um mapa aninhado, 
-    // que é como o Supabase retorna os dados de um JOIN.
     String? extrairNome(dynamic data) {
       if (data is Map && data.containsKey('nome')) {
         return data['nome'];
@@ -112,6 +112,7 @@ class Denuncia {
 
     return Denuncia(
       id: map['id'] ?? '',
+      userId: map['user_id'], // Mapeando do banco
       descricao: map['descricao'],
       latitude: map['latitude']?.toDouble(),
       longitude: map['longitude']?.toDouble(),
@@ -126,7 +127,6 @@ class Denuncia {
       createdAt: map['created_at'] != null ? DateTime.parse(map['created_at']) : null,
       status: map['status'],
 
-      // O Supabase retornará um mapa chamado 'municipios' com os dados do JOIN.
       municipioNome: extrairNome(map['localidades']?['municipios']),
       localidadeNome: extrairNome(map['localidades']),
     );

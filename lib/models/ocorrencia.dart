@@ -13,6 +13,7 @@ class Ocorrencia {
   final String? complemento;
   final double? latitude;
   final double? longitude;
+  final String? nome_localidade; // << NOVO CAMPO
   final String? codigo_localidade;
   final String? categoria_localidade;
   final Pendencia? pendencia_pesquisa;
@@ -35,7 +36,7 @@ class Ocorrencia {
   final DateTime? created_at;
   final bool sincronizado;
 
-  // Campos que existem APENAS no App, não no banco de dados
+  // Campos UI (não vão pro banco)
   final String? municipio_id_ui;
   final String? municipioNome;
   final String? localidade_ui;
@@ -54,6 +55,7 @@ class Ocorrencia {
     this.complemento,
     this.latitude,
     this.longitude,
+    this.nome_localidade, // << NOVO
     this.codigo_localidade,
     this.categoria_localidade,
     this.pendencia_pesquisa,
@@ -83,7 +85,6 @@ class Ocorrencia {
 
   factory Ocorrencia.fromMap(Map<String, dynamic> map) {
     String? extractedMunicipioNome;
-    // Lógica para extrair o nome do município de um join com localidades e municípios
     if (map['localidades'] != null && map['localidades'] is Map<String, dynamic>) {
       final localidadesData = map['localidades'] as Map<String, dynamic>;
       if (localidadesData['municipios'] != null &&
@@ -92,7 +93,6 @@ class Ocorrencia {
         extractedMunicipioNome = municipiosData['nome'];
       }
     } else {
-      // Fallback para ler do cache local se tiver sido salvo plano (mantendo lógica de leitura)
       extractedMunicipioNome = map['municipioNome'];
     }
 
@@ -104,9 +104,9 @@ class Ocorrencia {
       municipioNome: extractedMunicipioNome,
       tipo_atividade: map['tipo_atividade'] is List
           ? (map['tipo_atividade'] as List)
-              .map((e) => TipoAtividade.values.firstWhere((v) => v.name == e,
-                  orElse: () => TipoAtividade.pesquisa))
-              .toList()
+          .map((e) => TipoAtividade.values.firstWhere((v) => v.name == e,
+          orElse: () => TipoAtividade.pesquisa))
+          .toList()
           : [],
       data_atividade: map['data_atividade'] != null
           ? DateTime.parse(map['data_atividade'])
@@ -117,21 +117,19 @@ class Ocorrencia {
       complemento: map['complemento'],
       latitude: map['latitude'],
       longitude: map['longitude'],
+      nome_localidade: map['nome_localidade'], // << NOVO
       codigo_localidade: map['codigo_localidade'],
       categoria_localidade: map['categoria_localidade'],
       pendencia_pesquisa: map['pendencia_pesquisa'] != null
-          ? Pendencia.values
-              .firstWhere((e) => e.name == map['pendencia_pesquisa'])
+          ? Pendencia.values.firstWhere((e) => e.name == map['pendencia_pesquisa'])
           : null,
       pendencia_borrifacao: map['pendencia_borrifacao'] != null
-          ? Pendencia.values
-              .firstWhere((e) => e.name == map['pendencia_borrifacao'])
+          ? Pendencia.values.firstWhere((e) => e.name == map['pendencia_borrifacao'])
           : null,
       nome_morador: map['nome_morador'],
       numero_anexo: map['numero_anexo'],
       situacao_imovel: map['situacao_imovel'] != null
-          ? SituacaoImovel.values
-              .firstWhere((e) => e.name == map['situacao_imovel'])
+          ? SituacaoImovel.values.firstWhere((e) => e.name == map['situacao_imovel'])
           : null,
       tipo_parede: map['tipo_parede'],
       tipo_teto: map['tipo_teto'],
@@ -160,8 +158,6 @@ class Ocorrencia {
   }
 
   Map<String, dynamic> toMap() {
-    // REVERSÃO: Removidos campos 'localImagePaths', 'sincronizado', 'municipioNome' 
-    // para evitar erro no Supabase.
     return {
       'id': id,
       'agente_id': agente_id,
@@ -175,6 +171,7 @@ class Ocorrencia {
       'complemento': complemento,
       'latitude': latitude,
       'longitude': longitude,
+      'nome_localidade': nome_localidade, // << NOVO
       'codigo_localidade': codigo_localidade,
       'categoria_localidade': categoria_localidade,
       'pendencia_pesquisa': pendencia_pesquisa?.name,
@@ -197,14 +194,14 @@ class Ocorrencia {
     };
   }
 
-  // Método auxiliar opcional se quisermos salvar localmente no futuro sem quebrar o Supabase
+  // Método auxiliar opcional
   Map<String, dynamic> toLocalMap() {
-     var map = toMap();
-     map['localImagePaths'] = localImagePaths;
-     map['sincronizado'] = sincronizado;
-     map['municipioNome'] = municipioNome;
-     map['municipio_id_ui'] = municipio_id_ui;
-     return map;
+    var map = toMap();
+    map['localImagePaths'] = localImagePaths;
+    map['sincronizado'] = sincronizado;
+    map['municipioNome'] = municipioNome;
+    map['municipio_id_ui'] = municipio_id_ui;
+    return map;
   }
 
   Ocorrencia copyWith({
@@ -220,6 +217,7 @@ class Ocorrencia {
     String? complemento,
     double? latitude,
     double? longitude,
+    String? nome_localidade, // << NOVO
     String? codigo_localidade,
     String? categoria_localidade,
     Pendencia? pendencia_pesquisa,
@@ -259,6 +257,7 @@ class Ocorrencia {
       complemento: complemento ?? this.complemento,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      nome_localidade: nome_localidade ?? this.nome_localidade, // << NOVO
       codigo_localidade: codigo_localidade ?? this.codigo_localidade,
       categoria_localidade: categoria_localidade ?? this.categoria_localidade,
       pendencia_pesquisa: pendencia_pesquisa ?? this.pendencia_pesquisa,
@@ -268,16 +267,11 @@ class Ocorrencia {
       situacao_imovel: situacao_imovel ?? this.situacao_imovel,
       tipo_parede: tipo_parede ?? this.tipo_parede,
       tipo_teto: tipo_teto ?? this.tipo_teto,
-      melhoria_habitacional:
-          melhoria_habitacional ?? this.melhoria_habitacional,
-      vestigios_intradomicilio:
-          vestigios_intradomicilio ?? this.vestigios_intradomicilio,
-      barbeiros_intradomicilio:
-          barbeiros_intradomicilio ?? this.barbeiros_intradomicilio,
-      vestigios_peridomicilio:
-          vestigios_peridomicilio ?? this.vestigios_peridomicilio,
-      barbeiros_peridomicilio:
-          barbeiros_peridomicilio ?? this.barbeiros_peridomicilio,
+      melhoria_habitacional: melhoria_habitacional ?? this.melhoria_habitacional,
+      vestigios_intradomicilio: vestigios_intradomicilio ?? this.vestigios_intradomicilio,
+      barbeiros_intradomicilio: barbeiros_intradomicilio ?? this.barbeiros_intradomicilio,
+      vestigios_peridomicilio: vestigios_peridomicilio ?? this.vestigios_peridomicilio,
+      barbeiros_peridomicilio: barbeiros_peridomicilio ?? this.barbeiros_peridomicilio,
       inseticida: inseticida ?? this.inseticida,
       numero_cargas: numero_cargas ?? this.numero_cargas,
       codigo_etiqueta: codigo_etiqueta ?? this.codigo_etiqueta,

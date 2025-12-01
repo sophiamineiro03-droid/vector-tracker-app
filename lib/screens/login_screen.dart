@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -10,11 +11,11 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>(); // Chave para validar o formulário
-  int _selectedTab = 1; // 0 para Comunidade, 1 para Agente
+  final _formKey = GlobalKey<FormState>(); 
+  int _selectedTab = 1; // Mantive igual ao seu (1 = Agente)
   bool _isLoading = false;
   bool _obscureText = true;
-  bool _showForgotPassword = false; // Nova variável para controlar a exibição do botão
+  bool _showForgotPassword = false; 
 
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -28,11 +29,9 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _setupAuthListener() {
-    // Ouve eventos de autenticação, especificamente o de Recuperação de Senha
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
       if (data.event == AuthChangeEvent.passwordRecovery) {
         if (mounted) {
-           // Se detectar que o usuário clicou num link de senha, redireciona para a tela de troca
            Navigator.pushNamed(context, '/update_password');
         }
       }
@@ -47,13 +46,35 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // Lógica para enviar o email de recuperação
+  void _showFloatingSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.info_outline, color: Colors.white),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.only(bottom: 80, left: 20, right: 20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   Future<void> _sendPasswordResetEmail() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, digite seu e-mail acima para recuperar a senha.')),
-      );
+      _showFloatingSnackBar('Por favor, digite seu e-mail acima para recuperar a senha.', Colors.orange);
       return;
     }
 
@@ -62,30 +83,25 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await Supabase.instance.client.auth.resetPasswordForEmail(email);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('E-mail de recuperação enviado! Verifique sua caixa de entrada.'),
-            backgroundColor: Colors.green,
-          ),
-        );
+        _showFloatingSnackBar('E-mail de recuperação enviado! Verifique sua caixa de entrada.', Colors.green);
       }
     } on AuthException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao enviar e-mail: ${error.message}'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+         // Verifica se é erro de rede dentro do AuthException
+         final msg = error.message.toLowerCase();
+         if (msg.contains('socketexception') || msg.contains('host lookup') || msg.contains('network') || msg.contains('clientexception')) {
+            _showFloatingSnackBar('Não foi possível conectar. Verifique sua internet.', Colors.orange.shade800);
+         } else {
+            _showFloatingSnackBar('Erro ao enviar e-mail: ${error.message}', Colors.red.shade700);
+         }
+      }
+    } on SocketException {
+      if (mounted) {
+        _showFloatingSnackBar('Sem conexão com a internet. Verifique seu sinal.', Colors.orange.shade800);
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Erro inesperado. Tente novamente.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showFloatingSnackBar('Erro inesperado. Tente novamente.', Colors.red.shade700);
       }
     } finally {
       if (mounted) {
@@ -94,15 +110,9 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // Lógica de login atualizada para usar Supabase
   Future<void> _handleEnter() async {
-    // A lógica para a aba "Comunidade" permanece a mesma, sem login.
-    if (_selectedTab == 0) {
-      Navigator.pushReplacementNamed(context, '/community_home');
-      return;
-    }
-
-    // Valida o formulário para o Agente. Se os campos estiverem vazios, mostra o erro.
+    
+    // Valida o formulário
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -120,48 +130,74 @@ class _LoginScreenState extends State<LoginScreen> {
         password: password,
       );
 
-      // Se o código chegou aqui, o login foi um sucesso.
+      // Se logou com sucesso:
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/agent_home');
+        if (_selectedTab == 1) {
+          Navigator.pushReplacementNamed(context, '/agent_home');
+        } else {
+          // Se for comunidade logado
+          Navigator.pushReplacementNamed(context, '/community_home');
+        }
       }
 
     } on AuthException catch (error) {
-      // Se o erro for de credenciais inválidas, mostra o botão "Esqueci a Senha"
+      // 1. Tratamento de erro de Credenciais
       if (error.message.contains('Invalid login credentials') || error.message.contains('invalid_grant')) {
         setState(() {
           _showForgotPassword = true;
         });
+        if (mounted) {
+          _showFloatingSnackBar('E-mail ou senha incorretos.', Colors.red.shade700);
+        }
+        return;
       }
 
+      // 2. Tratamento de erro de REDE DENTRO do AuthException
+      final msg = error.message.toLowerCase();
+      if (msg.contains('socketexception') || msg.contains('host lookup') || msg.contains('network') || msg.contains('clientexception')) {
+         if (mounted) {
+            _showFloatingSnackBar('Não foi possível conectar. Verifique sua internet.', Colors.orange.shade800);
+         }
+         return;
+      }
+
+      // 3. Outros erros de Auth
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(error.message == 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+        _showFloatingSnackBar(error.message, Colors.red.shade700);
+      }
+
+    } on SocketException {
+      // CAPTURA FALHA DE REDE DIRETA
+      if (mounted) {
+        _showFloatingSnackBar('Não foi possível conectar. Verifique sua internet.', Colors.orange.shade800);
       }
     } catch (error) {
-      // Captura outros erros (ex: falta de conexão com a internet)
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Ocorreu um erro inesperado. Tente novamente.'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
+      // Captura outros erros de rede que podem vir encapsulados em Exception genérica
+      final msg = error.toString().toLowerCase();
+      if (msg.contains('socketexception') || msg.contains('host lookup') || msg.contains('network') || msg.contains('clientexception')) {
+         if (mounted) {
+          _showFloatingSnackBar('Erro de conexão. Verifique sua internet.', Colors.orange.shade800);
+        }
+      } else {
+        if (mounted) {
+          _showFloatingSnackBar('Ocorreu um erro inesperado. Tente novamente.', Colors.red.shade700);
+        }
       }
     } finally {
-      // Garante que o indicador de "carregando" pare, independente do resultado.
       if (mounted) {
         setState(() => _isLoading = false);
       }
     }
   }
 
+  void _handleGuestEnter() {
+    Navigator.pushReplacementNamed(context, '/community_home');
+  }
+
   @override
   Widget build(BuildContext context) {
     final Color accentColor = Theme.of(context).colorScheme.primary;
+    final isCommunity = _selectedTab == 0; // Verifica se é aba Comunidade
 
     return Scaffold(
       body: Container(
@@ -184,7 +220,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20.0)),
                   child: Padding(
                     padding: const EdgeInsets.all(24.0),
-                    // O Form é usado para agrupar e validar os campos de texto
                     child: Form(
                       key: _formKey,
                       child: Column(
@@ -231,7 +266,6 @@ class _LoginScreenState extends State<LoginScreen> {
                             },
                           ),
                           
-                          // Mostra o botão "Esqueci a Senha" apenas se o login falhar
                           if (_showForgotPassword) ...[
                             const SizedBox(height: 8),
                             Align(
@@ -244,6 +278,8 @@ class _LoginScreenState extends State<LoginScreen> {
                           ],
 
                           const SizedBox(height: 24.0),
+                          
+                          // Botão ENTRAR (Agora faz Login Real para ambos)
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: accentColor,
@@ -256,6 +292,25 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
                                 : const Text('Entrar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           ),
+
+                          // === BOTÕES EXTRAS PARA COMUNIDADE ===
+                          if (isCommunity) ...[
+                            const SizedBox(height: 16),
+                            OutlinedButton(
+                              onPressed: () => Navigator.pushNamed(context, '/signup_comunidade'),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12.0)),
+                              ),
+                              child: const Text('Não tem conta? Cadastre-se'),
+                            ),
+                            const SizedBox(height: 12),
+                            TextButton(
+                                onPressed: _handleGuestEnter,
+                                child: const Text('Entrar sem Login (Visitante)', 
+                                style: TextStyle(color: Colors.grey, decoration: TextDecoration.underline))
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -289,9 +344,11 @@ class _LoginScreenState extends State<LoginScreen> {
     return Expanded(
       child: GestureDetector(
         onTap: () {
-          // Só permite mudar de aba se não estiver carregando
           if (!_isLoading) {
-            setState(() => _selectedTab = index);
+            setState(() {
+               _selectedTab = index;
+               _showForgotPassword = false; 
+            });
           }
         },
         child: Container(

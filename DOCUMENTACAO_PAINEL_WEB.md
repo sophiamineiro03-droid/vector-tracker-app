@@ -15,7 +15,9 @@ painel-vector-trackers/
     │   ├── LoginScreen.js
     │   ├── LoginScreen.css
     │   ├── Dashboard.js
-    │   └── Dashboard.css
+    │   ├── Dashboard.css
+    │   ├── CollectionDetailsModal.js
+    │   └── CollectionDetailsModal.css
     ├── App.js
     ├── App.css
     ├── index.js
@@ -174,146 +176,142 @@ export default LoginScreen;
 ### D. Tela de Dashboard (`src/components/Dashboard.js`)
 
 ```javascript
-import React, { useState } from 'react';
-import './Dashboard.css';
-import logo from '../assets/logo.png';
-
-const Dashboard = () => {
-  // Dados fictícios (Mock)
-  const [dados] = useState([
-    { id: 1, data: '20/11/2025', localidade: 'Centro', rua: 'Rua das Flores, 123', agente: 'Carlos Silva', atividade: 'Pesquisa', status: 'Concluído' },
-    { id: 2, data: '20/11/2025', localidade: 'Vila Nova', rua: 'Av. Brasil, 450', agente: 'Ana Maria', atividade: 'Borrifação', status: 'Pendente' },
-    { id: 3, data: '19/11/2025', localidade: 'Zona Rural', rua: 'Sítio Boa Vista', agente: 'Roberto Lima', atividade: 'Pesquisa', status: 'Positivo' },
-  ]);
-
-  return (
-    <div className="dashboard-container">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <img src={logo} alt="Logo" className="sidebar-logo" />
-          <h3>Vector Admin</h3>
-        </div>
-        <nav className="sidebar-nav">
-          <a href="#" className="nav-item active">📊 Visão Geral</a>
-          <a href="#" className="nav-item">📍 Mapa de Calor</a>
-          <a href="#" className="nav-item">📝 Denúncias</a>
-          <a href="#" className="nav-item">💾 Exportar SIOCHAGAS</a>
-        </nav>
-        <div className="sidebar-footer">
-          <button className="logout-button">Sair do Sistema</button>
-        </div>
-      </aside>
-
-      {/* Conteúdo */}
-      <main className="main-content">
-        <header className="top-bar">
-          <h2>Painel de Controle</h2>
-          <div className="user-info">
-            <span>Olá, <strong>Coordenador</strong></span>
-            <div className="avatar">C</div>
-          </div>
-        </header>
-
-        {/* Cards */}
-        <section className="stats-grid">
-          <div className="stat-card">
-            <h3>Denúncias Hoje</h3>
-            <p className="stat-number">12</p>
-            <span className="stat-detail text-orange">🟠 4 Pendentes</span>
-          </div>
-          <div className="stat-card">
-            <h3>Visitas Realizadas</h3>
-            <p className="stat-number">45</p>
-            <span className="stat-detail text-green">🟢 Meta atingida</span>
-          </div>
-          <div className="stat-card">
-            <h3>Focos Encontrados</h3>
-            <p className="stat-number">3</p>
-            <span className="stat-detail text-red">🔴 Atenção Requerida</span>
-          </div>
-        </section>
-
-        {/* Tabela */}
-        <section className="data-section">
-          <div className="section-header">
-            <h3>Últimos Registros de Campo</h3>
-            <button className="btn-export">📥 Baixar CSV (SIOCHAGAS)</button>
-          </div>
-          
-          <div className="table-responsive">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Data</th><th>Localidade</th><th>Endereço</th><th>Agente</th><th>Atividade</th><th>Status</th><th>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dados.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.data}</td>
-                    <td>{item.localidade}</td>
-                    <td>{item.rua}</td>
-                    <td>{item.agente}</td>
-                    <td>{item.atividade}</td>
-                    <td><span className={`status-badge ${item.status.toLowerCase()}`}>{item.status}</span></td>
-                    <td><button className="btn-action">Ver</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      </main>
-    </div>
-  );
-};
-
-export default Dashboard;
+ 
 ```
 
 ### E. Estilo do Dashboard (`src/components/Dashboard.css`)
 
+> **Atualizado:** Logo maior, Ranking melhorado e Tabela mais legível.
+
 ```css
-.dashboard-container { display: flex; height: 100vh; background-color: #f4f6f9; font-family: sans-serif; }
+.dashboard-container { display: flex; height: 100vh; background-color: #F4F6F9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 
-/* Sidebar */
-.sidebar { width: 260px; background: linear-gradient(180deg, #2ECC71, #3498DB); color: white; display: flex; flex-direction: column; }
-.sidebar-header { padding: 30px 20px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); }
-.sidebar-logo { width: 60px; background: white; border-radius: 50%; padding: 5px; }
+/* SIDEBAR */
+.sidebar { 
+  width: 280px; /* Um pouco mais larga */
+  background: linear-gradient(180deg, #2ECC71, #3498DB); 
+  color: white; 
+  display: flex; 
+  flex-direction: column; 
+  box-shadow: 4px 0 10px rgba(0,0,0,0.1);
+}
+.sidebar-header { 
+  padding: 40px 20px; /* Mais espaço em cima */
+  text-align: center; 
+  border-bottom: 1px solid rgba(255,255,255,0.2); 
+}
+.logo-container {
+  background: white;
+  width: 110px; /* AUMENTADO DE 80 PARA 110 */
+  height: 110px; /* AUMENTADO */
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 15px auto;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+.sidebar-logo { width: 75px; /* AUMENTADO A LOGO INTERNA */ }
+.sidebar h3 { margin: 0; font-size: 1.3rem; font-weight: 700; letter-spacing: 0.5px; text-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
 .sidebar-nav { flex: 1; padding: 20px 0; }
-.nav-item { display: block; padding: 15px 25px; color: rgba(255,255,255,0.9); text-decoration: none; border-left: 4px solid transparent; }
-.nav-item:hover, .nav-item.active { background-color: rgba(255,255,255,0.2); color: white; border-left-color: white; }
+.nav-item { 
+  display: block; padding: 18px 30px; color: rgba(255,255,255,0.95); text-decoration: none; font-weight: 500; border-left: 6px solid transparent; transition: all 0.3s ease; font-size: 1.05rem;
+}
+.nav-item:hover, .nav-item.active { background-color: rgba(255,255,255,0.2); color: white; border-left-color: white; font-weight: 700; }
 .sidebar-footer { padding: 20px; }
-.logout-button { width: 100%; padding: 10px; background-color: rgba(0,0,0,0.2); border: none; color: white; border-radius: 8px; cursor: pointer; }
+.logout-button { width: 100%; padding: 14px; background-color: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; border-radius: 8px; cursor: pointer; font-weight: 600; transition: 0.2s; }
+.logout-button:hover { background-color: rgba(0,0,0,0.4); }
 
-/* Conteúdo */
-.main-content { flex: 1; overflow-y: auto; padding: 30px; }
-.top-bar { display: flex; justify-content: space-between; margin-bottom: 30px; }
-.user-info { display: flex; gap: 10px; align-items: center; }
-.avatar { width: 40px; height: 40px; background-color: #3498DB; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+/* CONTEÚDO */
+.main-content { flex: 1; overflow-y: auto; padding: 40px; position: relative; }
+.top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 40px; }
+.top-bar h2 { color: #2C3E50; margin: 0; font-size: 1.8rem; }
+.user-info { display: flex; align-items: center; gap: 12px; background: white; padding: 10px 24px; border-radius: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+.avatar { width: 40px; height: 40px; background: linear-gradient(135deg, #3498DB, #2980B9); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.2rem; }
 
-/* Cards */
-.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
-.stat-card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-.stat-number { font-size: 36px; font-weight: bold; color: #333; margin: 10px 0; }
-.text-orange { color: #ff9f43; } .text-green { color: #2ecc71; } .text-red { color: #ee5253; }
+/* KPI GRID */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 25px; margin-bottom: 35px; }
+.kpi-card { background: white; padding: 25px; border-radius: 15px; display: flex; align-items: center; gap: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); position: relative; overflow: hidden; transition: transform 0.2s; }
+.kpi-card:hover { transform: translateY(-3px); }
+.kpi-card::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; }
+.kpi-card.critical::after { background: #EF4444; }
+.kpi-card.warning::after { background: #F59E0B; }
+.kpi-card.service::after { background: #3B82F6; }
+.kpi-card.meta::after { background: #2ECC71; }
+.kpi-icon { font-size: 2.2rem; background: #F8F9FA; padding: 18px; border-radius: 16px; }
+.kpi-info { display: flex; flex-direction: column; }
+.kpi-label { font-size: 0.9rem; color: #7F8C8D; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.kpi-value { font-size: 2rem; font-weight: 800; color: #2C3E50; margin-top: 5px; }
 
-/* Tabela */
-.data-section { background: white; border-radius: 12px; padding: 25px; }
-.section-header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-.btn-export { background-color: #2ecc71; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
-.data-table { width: 100%; border-collapse: collapse; }
-.data-table th { text-align: left; padding: 15px; color: #888; border-bottom: 2px solid #f0f0f0; }
-.data-table td { padding: 15px; border-bottom: 1px solid #f0f0f0; }
-.status-badge { padding: 5px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; }
-.status-badge.concluído { background-color: #d4edda; color: #155724; }
-.status-badge.pendente { background-color: #fff3cd; color: #856404; }
-.status-badge.positivo { background-color: #f8d7da; color: #721c24; }
-.btn-action { padding: 5px 10px; border: 1px solid #3498DB; color: #3498DB; background: transparent; border-radius: 5px; cursor: pointer; }
+/* MIDDLE SECTION */
+.middle-section { display: flex; gap: 25px; margin-bottom: 35px; height: 420px; }
+.map-container { flex: 7; background: white; border-radius: 15px; padding: 25px; display: flex; flex-direction: column; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+.section-header h3 { margin: 0; color: #2C3E50; font-size: 1.3rem; }
+.map-legend { font-size: 0.85rem; color: #7F8C8D; display: flex; align-items: center; gap: 15px; background: #F8F9FA; padding: 8px 15px; border-radius: 20px; }
+.ranking-container { flex: 3; background: white; border-radius: 15px; padding: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
 
-@media (max-width: 768px) { .dashboard-container { flex-direction: column; } .sidebar { width: 100%; height: auto; } }
+/* RANKING MELHORADO */
+.ranking-list { list-style: none; padding: 0; margin-top: 15px; overflow-y: auto; flex: 1; }
+.ranking-item { 
+  display: flex; justify-content: space-between; align-items: center; 
+  padding: 15px; margin-bottom: 10px; 
+  background-color: #F8FAFC; border-radius: 10px; /* Caixinha para cada item */
+  border-left: 4px solid transparent;
+  transition: 0.2s;
+}
+.ranking-item:hover { background-color: #F1F5F9; transform: translateX(2px); }
+.rank-left { display: flex; align-items: center; gap: 12px; }
+.rank-pos { 
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; 
+  border-radius: 50%; font-size: 0.9rem; font-weight: bold; color: white; background: #94A3B8;
+}
+.rank-pos.pos-1 { background: #EF4444; box-shadow: 0 2px 5px rgba(239, 68, 68, 0.3); } /* Vermelho para o 1º */
+.rank-pos.pos-2 { background: #F59E0B; } /* Laranja para o 2º */
+.rank-pos.pos-3 { background: #3B82F6; } /* Azul para o 3º */
+.rank-name { font-weight: 600; color: #334155; font-size: 1rem; }
+.rank-val { font-size: 0.9rem; color: #64748B; font-weight: 700; }
+
+/* TABELA MELHORADA */
+.data-section { background: white; border-radius: 15px; padding: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+.btn-export { background: linear-gradient(90deg, #2ECC71, #27AE60); color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 10px rgba(46, 204, 113, 0.2); transition: 0.2s; }
+.btn-export:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(46, 204, 113, 0.3); }
+
+.data-table { width: 100%; border-collapse: separate; border-spacing: 0 5px; margin-top: 10px; } /* Espaçamento entre linhas */
+.data-table th { 
+  text-align: left; padding: 15px; 
+  color: #2C3E50; /* Mais escuro */
+  font-size: 0.95rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; 
+  border-bottom: 2px solid #E2E8F0;
+}
+.data-table td { 
+  padding: 18px 15px; /* Mais espaçamento */
+  font-size: 1rem; color: #2C3E50; 
+  background: white; border-bottom: 1px solid #F1F5F9; 
+}
+.data-table tr:hover td { background-color: #F8FAFC; } /* Efeito hover na linha */
+.text-center { text-align: center; }
+
+/* BADGES */
+.badge { padding: 6px 12px; border-radius: 30px; font-size: 0.8rem; font-weight: 700; display: inline-block; letter-spacing: 0.5px; }
+.badge-capture { background: #FFEBEE; color: #C0392B; border: 1px solid rgba(192, 57, 43, 0.1); }
+.badge-trace { background: #FFF3E0; color: #E67E22; border: 1px solid rgba(230, 126, 34, 0.1); }
+.badge-clean { background: #E8F8F5; color: #27AE60; border: 1px solid rgba(39, 174, 96, 0.1); }
+
+.btn-action { background: white; border: 1px solid #3498DB; color: #3498DB; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; }
+.btn-action:hover { background: #3498DB; color: white; box-shadow: 0 2px 5px rgba(52, 152, 219, 0.3); }
+
+@media (max-width: 1024px) { .middle-section { flex-direction: column; height: auto; } .map-container, .ranking-container { width: 100%; height: 400px; } }
+@media (max-width: 768px) { .dashboard-container { flex-direction: column; } .sidebar { width: 100%; height: auto; flex-direction: row; justify-content: space-between; padding: 15px; } .sidebar-nav, .sidebar-footer { display: none; } .logo-container { width: 50px; height: 50px; margin: 0; } .sidebar-logo { width: 30px; } }
 ```
+
+### F. Modal de Detalhes (`src/components/CollectionDetailsModal.js`)
+
+(Mantenha o mesmo código anterior).
+
+### G. Estilo do Modal (`src/components/CollectionDetailsModal.css`)
+
+(Mantenha o mesmo código anterior).
 
 ## 3. Como Rodar
 

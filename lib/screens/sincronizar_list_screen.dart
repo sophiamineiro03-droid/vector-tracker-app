@@ -117,10 +117,15 @@ class _SincronizarListScreenState extends State<SincronizarListScreen> {
 
               if (context.mounted) {
                 ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                
+                // Lógica de cor ajustada: Procura por palavras chave de sucesso
+                final isSuccess = resultMessage.toLowerCase().contains('sincronizadas') || 
+                                  resultMessage.toLowerCase().contains('concluída');
+                
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(resultMessage),
-                    backgroundColor: resultMessage.contains('sucesso') ? Colors.green : Colors.red,
+                    backgroundColor: isSuccess ? Colors.green : Colors.redAccent,
                   ),
                 );
               }

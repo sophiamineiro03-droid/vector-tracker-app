@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:vector_tracker_app/models/agente.dart';
 import 'package:vector_tracker_app/repositories/agente_repository.dart';
 import 'package:vector_tracker_app/widgets/gradient_app_bar.dart';
+import 'package:vector_tracker_app/widgets/smart_image.dart';
 
 class EditAgentProfileScreen extends StatefulWidget {
   final Agente agente;
@@ -18,12 +21,15 @@ class _EditAgentProfileScreenState extends State<EditAgentProfileScreen> {
   late final TextEditingController _nameController;
   late final TextEditingController _emailController;
   bool _isLoading = false;
+  String? _currentAvatarUrl;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.agente.nome);
     _emailController = TextEditingController(text: widget.agente.email);
+    _currentAvatarUrl = widget.agente.avatarUrl;
   }
 
   @override
@@ -31,6 +37,40 @@ class _EditAgentProfileScreenState extends State<EditAgentProfileScreen> {
     _nameController.dispose();
     _emailController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAndUploadImage() async {
+    try {
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
+      if (image == null) return;
+
+      setState(() => _isLoading = true);
+
+      final imageFile = File(image.path);
+      final repository = GetIt.I.get<AgenteRepository>();
+      
+      // Upload e atualização imediata
+      final newUrl = await repository.uploadAvatar(imageFile);
+
+      setState(() {
+        _currentAvatarUrl = newUrl;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Foto atualizada com sucesso!')),
+        );
+      }
+
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erro ao atualizar foto (verifique sua conexão): $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _saveChanges() async {
@@ -124,6 +164,50 @@ class _EditAgentProfileScreenState extends State<EditAgentProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // --- ÁREA DA FOTO ---
+              Center(
+                child: GestureDetector(
+                  onTap: _isLoading ? null : _pickAndUploadImage,
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Theme.of(context).primaryColor, width: 2),
+                        ),
+                        child: ClipOval(
+                          child: _currentAvatarUrl != null
+                              ? SmartImage(
+                                  imageSource: _currentAvatarUrl!,
+                                  width: 120,
+                                  height: 120,
+                                  fit: BoxFit.cover,
+                                )
+                              : const Icon(Icons.person, size: 60, color: Colors.grey),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Theme.of(context).primaryColor,
+                          child: const Icon(Icons.camera_alt, size: 18, color: Colors.white),
+                        ),
+                      ),
+                      if (_isLoading)
+                        const Positioned.fill(
+                          child: CircularProgressIndicator(),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+
               TextFormField(
                 controller: _nameController,
                 decoration: const InputDecoration(
@@ -172,11 +256,6 @@ class _EditAgentProfileScreenState extends State<EditAgentProfileScreen> {
                    padding: const EdgeInsets.symmetric(vertical: 16.0),
                 ),
               ),
-               if (_isLoading)
-                const Padding(
-                  padding: EdgeInsets.only(top: 24.0),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
             ],
           ),
         ),
